@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:qa": "vite --mode qa",
+    "dev:pdn": "vite --mode production",
     "build": "tsc -b && vite build",
+    "build:qa": "tsc -b && vite build --mode qa",
+    "build:pdn": "tsc -b && vite build --mode production",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -35,5 +39,8 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12"
+  },
+  "overrides": {
+    "source-map": "0.7.4"
   }
 }

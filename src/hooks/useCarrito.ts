@@ -10,6 +10,10 @@ export interface Producto {
   categoria: string;
   descripcion: string;
   stock: number;
+  descripcion_larga?: string;
+  especificaciones?: Record<string, string>;
+  marca?: string;
+  imagenes?: { id: number; url: string; orden: number }[];
 }
 
 // 2. Un CartItem es un Producto, pero con la propiedad extra de "cantidad"

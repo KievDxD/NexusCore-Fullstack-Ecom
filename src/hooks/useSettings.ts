@@ -8,8 +8,10 @@ interface SettingsState {
   currency: Moneda;
   // 🇨🇴 Agregamos COP al tipado para que la aplicación no falle al leer la moneda local
   rates: { COP: number; USD: number; MXN: number }; 
+  whatsappNumber: string;
   setSettings: (settings: Partial<Omit<SettingsState, 'setSettings' | 'fetchRates'>>) => void;
   setCurrency: (currency: Moneda) => void;
+  setWhatsappNumber: (number: string) => void;
   fetchRates: () => Promise<void>;
 }
 
@@ -21,9 +23,11 @@ export const useSettings = create<SettingsState>()(
       
       // Valores iniciales de seguridad (COP siempre arranca en 1)
       rates: { COP: 1, USD: 0.00025, MXN: 0.0042 }, 
+      whatsappNumber: '573043104831',
       
       setSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),
       setCurrency: (currency) => set({ currency }),
+      setWhatsappNumber: (whatsappNumber) => set({ whatsappNumber }),
       
       fetchRates: async () => {
         try {

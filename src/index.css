@@ -1,3 +1,61 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    /* Variables por defecto del tema claro */
+    --theme-bg: 248 250 252; /* slate-50 */
+    --theme-card: 255 255 255; /* white */
+    --theme-input: 241 245 249; /* slate-100 */
+    --theme-border: 226 232 240; /* slate-200 */
+    --theme-text: 15 23 42; /* slate-900 */
+    --theme-text-muted: 100 116 139; /* slate-500 */
+    --theme-accent: 79 70 229; /* indigo-600 */
+    --theme-accent-hover: 67 56 202; /* indigo-700 */
+  }
+
+  .theme-claro {
+    --theme-bg: 248 250 252;
+    --theme-card: 255 255 255;
+    --theme-input: 241 245 249;
+    --theme-border: 226 232 240;
+    --theme-text: 15 23 42;
+    --theme-text-muted: 100 116 139;
+    --theme-accent: 79 70 229;
+    --theme-accent-hover: 67 56 202;
+  }
+
+  .theme-crema {
+    --theme-bg: 253 251 247; /* Crema suave */
+    --theme-card: 255 255 255; /* Blanco puro */
+    --theme-input: 249 246 239; /* Beige sutil */
+    --theme-border: 235 220 185; /* Arena cálido */
+    --theme-text: 69 26 3; /* amber-950 */
+    --theme-text-muted: 146 64 14; /* amber-800 */
+    --theme-accent: 180 83 9; /* amber-700 */
+    --theme-accent-hover: 146 64 14; /* amber-800 */
+  }
+
+  .theme-cyberpunk {
+    --theme-bg: 9 9 11; /* zinc-950 */
+    --theme-card: 24 24 27; /* zinc-900 */
+    --theme-input: 39 39 42; /* zinc-800 */
+    --theme-border: 63 63 70; /* zinc-700 */
+    --theme-text: 250 250 250; /* zinc-50 */
+    --theme-text-muted: 161 161 170; /* zinc-400 */
+    --theme-accent: 236 72 153; /* pink-500 (Rosa Neón) */
+    --theme-accent-hover: 219 39 119; /* pink-600 */
+  }
+
+  .theme-nocturno {
+    --theme-bg: 15 23 42; /* slate-900 */
+    --theme-card: 30 41 59; /* slate-800 */
+    --theme-input: 51 65 85; /* slate-700 */
+    --theme-border: 71 85 105; /* slate-600 */
+    --theme-text: 248 250 252; /* slate-50 */
+    --theme-text-muted: 148 163 184; /* slate-400 */
+    --theme-accent: 99 102 241; /* indigo-500 */
+    --theme-accent-hover: 79 70 229; /* indigo-600 */
+  }
+}
