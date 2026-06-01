@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
-import { X, Settings, Check, User, ShieldAlert, Palette, Loader2 } from 'lucide-react';
+import { X, Settings, Check, User, ShieldAlert, Palette, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SettingsModalProps {
@@ -13,7 +13,7 @@ type PestañaAjustes = 'apariencia' | 'perfil' | 'admin';
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { backgroundColor, currency, setSettings, whatsappNumber, setWhatsappNumber } = useSettings();
-  const { user, role, username, isAdmin, actualizarUsername } = useAuth();
+  const { user, role, username, avatarUrl, actualizarAvatar, subirAvatar, isAdmin, actualizarUsername } = useAuth();
   
   // Tab activa
   const [tabActiva, setTabActiva] = useState<PestañaAjustes>('apariencia');
@@ -22,16 +22,77 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [numInput, setNumInput] = useState(whatsappNumber);
   const [userInput, setUserInput] = useState(username || '');
   const [guardandoUser, setGuardandoUser] = useState(false);
+  const [subiendoAvatar, setSubiendoAvatar] = useState(false);
 
   // Sincronizar inputs al abrir el modal o cambiar datos
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNumInput(whatsappNumber);
       setUserInput(username || '');
-      // Restablecer a pestaña apariencia si cierra y vuelve a abrir
       setTabActiva('apariencia');
     }
   }, [whatsappNumber, username, isOpen]);
+
+  const avataresPredeterminados = [
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Felix',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Aneka',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Jack',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Buster',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Midnight',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Shadow',
+  ];
+
+  const handleSelectDefaultAvatar = async (url: string) => {
+    setSubiendoAvatar(true);
+    try {
+      await actualizarAvatar(url);
+      toast.success("¡Avatar actualizado con éxito!");
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "No se pudo cambiar el avatar.";
+      toast.error("Error al actualizar avatar", {
+        description: errorMsg,
+      });
+    } finally {
+      setSubiendoAvatar(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      toast.error("Archivo no válido", {
+        description: "Por favor, selecciona una imagen (PNG, JPG, WEBP).",
+      });
+      return;
+    }
+
+    // Validar tamaño máximo (2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Archivo muy grande", {
+        description: "El tamaño máximo permitido es de 2 MB.",
+      });
+      return;
+    }
+
+    setSubiendoAvatar(true);
+    try {
+      await subirAvatar(file);
+      toast.success("¡Imagen de perfil subida!", {
+        description: "Tu avatar se ha actualizado correctamente.",
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Ocurrió un error al subir el archivo.";
+      toast.error("Error al subir imagen", {
+        description: errorMsg,
+      });
+    } finally {
+      setSubiendoAvatar(false);
+    }
+  };
 
   const opcionesColores = [
     { name: 'Claro Minimalista', class: 'bg-slate-50 text-gray-900', dot: 'bg-slate-200' },
@@ -74,9 +135,10 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       toast.success("¡Username actualizado!", {
         description: `Tu perfil se mostrará al instante como @${cleanUsername}.`,
       });
-    } catch (err: any) {
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Es posible que el nombre de usuario ya esté registrado.";
       toast.error("Error al actualizar username", {
-        description: err.message || "Es posible que el nombre de usuario ya esté registrado.",
+        description: errorMsg,
       });
     } finally {
       setGuardandoUser(false);
@@ -185,7 +247,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {['COP', 'USD', 'MXN'].map((moneda) => (
                     <button
                       key={moneda}
-                      onClick={() => setSettings({ currency: moneda as any })}
+                      onClick={() => setSettings({ currency: moneda as 'COP' | 'USD' | 'MXN' })}
                       className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs transition-all border-2 ${currency === moneda ? 'border-themeAccent bg-themeAccent/15 text-themeAccent' : 'border-themeBorder text-themeTextMuted hover:border-themeAccent/30 bg-themeInput/20'}`}
                     >
                       {moneda}
@@ -201,19 +263,79 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           {/* pestaña 2: PERFIL DE USUARIO */}
           {tabActiva === 'perfil' && user && (
-            <div className="space-y-5 animate-fade-in">
-              <div className="flex items-center gap-4 bg-themeInput/30 p-4 rounded-2xl border border-themeBorder/60">
-                <img 
-                  src={`https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`} 
-                  alt="Avatar" 
-                  className="w-12 h-12 rounded-xl bg-themeAccent/10 p-1 border border-themeBorder"
-                />
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-4 bg-themeInput/30 p-4 rounded-2xl border border-themeBorder/60 relative overflow-hidden group">
+                <div className="relative w-12 h-12 rounded-xl bg-themeAccent/10 p-0.5 border border-themeBorder overflow-hidden flex items-center justify-center shrink-0">
+                  {subiendoAvatar && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
+                      <Loader2 className="w-4 h-4 text-themeAccent animate-spin" />
+                    </div>
+                  )}
+                  <img 
+                    src={avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`} 
+                    alt="Avatar" 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-themeTextMuted font-bold uppercase tracking-wider">{role || 'Usuario'}</p>
                   <p className="text-sm font-black text-themeText truncate">@{username || 'sin_username'}</p>
                   <p className="text-[11px] text-themeTextMuted truncate mt-0.5">{user.email}</p>
                 </div>
               </div>
+
+              {/* Sección de Edición de Avatar */}
+              <section className="border-t border-themeBorder/40 pt-5 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs font-black text-themeText uppercase tracking-widest">Imagen de Perfil</h3>
+                  <span className="text-[10px] bg-themeAccent/10 text-themeAccent px-2 py-0.5 rounded font-bold uppercase tracking-wider">Avatar</span>
+                </div>
+
+                {/* Subir archivo local */}
+                <div className="space-y-2">
+                  <input
+                    type="file"
+                    id="upload-avatar-file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    disabled={subiendoAvatar}
+                  />
+                  <label
+                    htmlFor="upload-avatar-file"
+                    className={`flex items-center justify-center gap-2 w-full py-3 px-4 border-2 border-dashed border-themeBorder hover:border-themeAccent/50 rounded-xl cursor-pointer bg-themeInput/10 hover:bg-themeAccent/5 transition-all text-xs font-bold text-themeTextMuted hover:text-themeText ${subiendoAvatar ? 'opacity-50 pointer-events-none' : ''}`}
+                  >
+                    {subiendoAvatar ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-themeAccent" />
+                    ) : (
+                      <Upload className="w-4 h-4 text-themeAccent" />
+                    )}
+                    {subiendoAvatar ? 'Subiendo imagen...' : 'Subir imagen de tu PC (Max 2MB)'}
+                  </label>
+                </div>
+
+                {/* Grid de 6 avatares predeterminados */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold text-themeTextMuted uppercase tracking-wider">O elige un avatar predeterminado:</p>
+                  <div className="grid grid-cols-6 gap-2">
+                    {avataresPredeterminados.map((url, idx) => {
+                      const isSelected = avatarUrl === url;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSelectDefaultAvatar(url)}
+                          disabled={subiendoAvatar}
+                          className={`aspect-square rounded-xl overflow-hidden bg-themeInput/25 border-2 p-1.5 transition-all hover:scale-105 active:scale-95 flex items-center justify-center ${isSelected ? 'border-themeAccent bg-themeAccent/10' : 'border-themeBorder hover:border-themeAccent/40'}`}
+                          title={`Avatar predeterminado ${idx + 1}`}
+                        >
+                          <img src={url} alt={`Avatar ${idx + 1}`} className="w-full h-full object-cover" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
 
               <section className="border-t border-themeBorder/40 pt-5">
                 <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Nombre de usuario (Username)</h3>

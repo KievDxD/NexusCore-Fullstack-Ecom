@@ -1,0 +1,64 @@
+name: Deploy Production (NEXUS // CORE)
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+    types: [closed]
+
+jobs:
+  build-and-test:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Verify Types and Build Production
+        run: npm run build:pdn
+        env:
+          VITE_SUPABASE_URL: "${{ secrets.VITE_SUPABASE_URL_PROD }}"
+          VITE_SUPABASE_ANON_KEY: "${{ secrets.VITE_SUPABASE_ANON_KEY_PROD }}"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-build
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build
+          path: dist/
+
+      - name: Display Deployment Status
+        run: |
+          echo "=========================================================="
+          echo "COMPILACION DE PRODUCCION EXITOSA Y VERIFICADA"
+          echo "Listo para despliegue automatizado."
+          echo "Para conectar este pipeline con tu proveedor de hosting:"
+          echo "1. Agrega las llaves secretas correspondientes en GitHub Secrets."
+          echo "2. Descomenta la seccion del proveedor deseado en este archivo."
+          echo "=========================================================="

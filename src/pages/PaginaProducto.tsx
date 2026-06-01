@@ -6,7 +6,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency } from '../utils/currency';
-import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ReviewItem {
@@ -17,7 +17,7 @@ interface ReviewItem {
   profiles?: {
     username: string;
     avatar_url: string;
-  };
+  } | null;
 }
 
 export default function PaginaProducto() {
@@ -26,7 +26,7 @@ export default function PaginaProducto() {
   const { fetchProductoById } = useProductos();
   const agregarProducto = useCarrito((state) => state.agregarProducto);
   const { currency, rates } = useSettings();
-  const { user, username } = useAuth();
+  const { user, username, avatarUrl } = useAuth();
 
   const [producto, setProducto] = useState<Producto | null>(null);
   const [resenas, setResenas] = useState<ReviewItem[]>([]);
@@ -35,6 +35,15 @@ export default function PaginaProducto() {
   // Estados de galería
   const [imagenActiva, setImagenActiva] = useState('');
   const [zoomAbierto, setZoomAbierto] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const { left, top, width, height } = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - left) / width) * 100;
+    const y = ((e.clientY - top) / height) * 100;
+    setZoomPos({ x, y });
+  };
 
   // Estados de compra
   const [cantidad, setCantidad] = useState(1);
@@ -45,6 +54,40 @@ export default function PaginaProducto() {
   const [hoverPuntuacion, setHoverPuntuacion] = useState(0);
   const [nuevoComentario, setNuevoComentario] = useState('');
   const [enviandoResena, setEnviandoResena] = useState(false);
+
+  // Estados del modal interactivo
+  const [modalZoomed, setModalZoomed] = useState(false);
+  const [modalZoomPos, setModalZoomPos] = useState({ x: 50, y: 50 });
+
+  const imagenesArray = producto?.imagenes && producto.imagenes.length > 0
+    ? producto.imagenes.map(img => img.url)
+    : producto ? [producto.imagen] : [];
+
+  const currentIdx = imagenesArray.indexOf(imagenActiva) !== -1 ? imagenesArray.indexOf(imagenActiva) : 0;
+
+  const handleModalMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!modalZoomed) return;
+    const { left, top, width, height } = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - left) / width) * 100;
+    const y = ((e.clientY - top) / height) * 100;
+    setModalZoomPos({ x, y });
+  };
+
+  const prevImage = () => {
+    if (imagenesArray.length <= 1) return;
+    const newIdx = (currentIdx - 1 + imagenesArray.length) % imagenesArray.length;
+    setImagenActiva(imagenesArray[newIdx]);
+    setModalZoomed(false);
+    setModalZoomPos({ x: 50, y: 50 });
+  };
+
+  const nextImage = () => {
+    if (imagenesArray.length <= 1) return;
+    const newIdx = (currentIdx + 1) % imagenesArray.length;
+    setImagenActiva(imagenesArray[newIdx]);
+    setModalZoomed(false);
+    setModalZoomPos({ x: 50, y: 50 });
+  };
 
   useEffect(() => {
     async function cargarDetalles() {
@@ -65,6 +108,33 @@ export default function PaginaProducto() {
     cargarDetalles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (!zoomAbierto || !producto) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoomAbierto(false);
+        setModalZoomed(false);
+      }
+      if (e.key === 'ArrowLeft') prevImage();
+      if (e.key === 'ArrowRight') nextImage();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomAbierto, currentIdx, imagenesArray, producto]);
+
+  // Bloquear scroll del body cuando el modal está abierto
+  useEffect(() => {
+    if (zoomAbierto) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [zoomAbierto]);
 
   if (cargando) {
     return (
@@ -89,9 +159,7 @@ export default function PaginaProducto() {
 
   const handleAgregar = () => {
     if (sinStock) return;
-    for (let i = 0; i < cantidad; i++) {
-      agregarProducto(producto);
-    }
+    agregarProducto(producto, cantidad);
     toast.success(`Añadido: ${cantidad}x ${producto.nombre} al carrito`);
     setEstaAgregando(true);
     setTimeout(() => setEstaAgregando(false), 1000);
@@ -117,7 +185,6 @@ export default function PaginaProducto() {
 
     setEnviandoResena(true);
 
-    // Capturar valores actuales antes de cualquier cambio de estado
     const puntuacionFinal = nuevaPuntuacion;
     const comentarioFinal = nuevoComentario.trim();
 
@@ -144,7 +211,7 @@ export default function PaginaProducto() {
         created_at: data?.created_at ?? new Date().toISOString(),
         profiles: {
           username: username || user.email?.split('@')[0] || 'yo',
-          avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`
+          avatar_url: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`
         }
       };
 
@@ -156,26 +223,12 @@ export default function PaginaProducto() {
         description: "Gracias por valorar este producto."
       });
 
-    } catch (err: any) {
-      console.warn("Fallo escritura en Supabase, agregando de forma simulada local:", err);
-      
-      // Simulación local si Supabase tiene problemas de RLS o estamos sin internet
-      const reviewSimulada: ReviewItem = {
-        id: Date.now(),
-        puntuacion: puntuacionFinal,
-        comentario: comentarioFinal,
-        created_at: new Date().toISOString(),
-        profiles: {
-          username: username || 'usuario_demo',
-          avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.id || '123'}`
-        }
-      };
-
-      setResenas(prev => [reviewSimulada, ...prev]);
-      setNuevoComentario('');
-      setNuevaPuntuacion(5);
-      setHoverPuntuacion(0);
-      toast.success("¡Reseña enviada con éxito (Modo Demo)!");
+    } catch (err) {
+      console.error("Error al publicar reseña en Supabase:", err);
+      const errorMsg = err instanceof Error ? err.message : 'Error al conectar con la base de datos';
+      toast.error("No se pudo guardar tu reseña", {
+        description: errorMsg
+      });
     } finally {
       setEnviandoResena(false);
     }
@@ -210,18 +263,43 @@ export default function PaginaProducto() {
         <div className="md:col-span-6 space-y-4">
           
           {/* Foto Principal */}
-          <div className="relative group aspect-[4/3] rounded-2xl overflow-hidden border border-themeBorder bg-themeInput/20 flex items-center justify-center shadow-lg">
+          <div 
+            className="relative group aspect-[4/3] rounded-2xl overflow-hidden border border-themeBorder bg-themeInput/20 flex items-center justify-center shadow-lg cursor-zoom-in"
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => {
+              setIsHovered(false);
+              setZoomPos({ x: 50, y: 50 });
+            }}
+            onMouseMove={handleMouseMove}
+            onClick={() => setZoomAbierto(true)}
+          >
             <img 
               src={imagenActiva} 
               alt={producto.nombre} 
-              className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500 cursor-zoom-in"
-              onClick={() => setZoomAbierto(true)}
+              style={{
+                transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
+                transform: isHovered ? 'scale(2.2)' : 'scale(1)'
+              }}
+              className="w-full h-full object-cover transition-transform duration-200 ease-out"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
               }}
             />
+            {isHovered && (
+              <div 
+                className="absolute pointer-events-none border-2 border-themeAccent rounded-full w-28 h-28 shadow-lg shadow-themeAccent/20 bg-themeAccent/5 backdrop-blur-[0.5px]"
+                style={{
+                  left: `${zoomPos.x}%`,
+                  top: `${zoomPos.y}%`,
+                  transform: 'translate(-50%, -50%)',
+                }}
+              />
+            )}
             <button 
-              onClick={() => setZoomAbierto(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomAbierto(true);
+              }}
               className="absolute bottom-4 right-4 bg-themeCard/90 hover:bg-themeCard text-themeText p-2 rounded-xl border border-themeBorder/60 shadow-lg backdrop-blur-sm transition-all active:scale-95 flex items-center gap-1.5 text-xs font-black uppercase tracking-wider"
             >
               <ZoomIn size={14} className="text-themeAccent" />
@@ -504,24 +582,129 @@ export default function PaginaProducto() {
         </div>
       </div>
 
-      {/* 🖼️ ZOOM MODAL (MODAL PANTALLA COMPLETA DE IMAGEN CON ALTA RESOLUCIÓN) */}
+      {/* 🖼️ INTERACTIVE LIGHTBOX / GALLERY MODAL (PUNTO 1) */}
       {zoomAbierto && (
-        <div className="fixed inset-0 z-999 bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-fade-in">
-          <button 
-            onClick={() => setZoomAbierto(false)}
-            className="absolute top-6 right-6 text-white hover:text-red-500 p-2 hover:bg-white/10 rounded-full transition-all active:scale-95"
-            title="Cerrar Zoom"
-          >
-            <X className="w-8 h-8" />
-          </button>
-          
-          <div className="relative max-w-4xl max-h-[85vh] overflow-hidden rounded-xl border border-white/10 shadow-2xl flex items-center justify-center">
-            <img 
-              src={imagenActiva} 
-              alt={producto.nombre} 
-              className="max-w-full max-h-[80vh] object-contain rounded-lg animate-scale-up" 
-            />
+        <div 
+          className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-between p-4 animate-fade-in"
+          onClick={() => {
+            setZoomAbierto(false);
+            setModalZoomed(false);
+          }}
+        >
+          {/* Cabecera del modal */}
+          <div className="w-full flex items-center justify-between px-4 py-2 z-10 shrink-0">
+            <span className="text-xs font-black uppercase tracking-widest text-white/60">
+              {producto.nombre} ({currentIdx + 1} / {imagenesArray.length})
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider hidden sm:block">
+                {modalZoomed ? 'Mover ratón para explorar · Clic para salir del zoom' : 'Clic en imagen para zoom · Esc para cerrar'}
+              </span>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setZoomAbierto(false);
+                  setModalZoomed(false);
+                }}
+                className="text-white/70 hover:text-red-400 p-2 hover:bg-white/10 rounded-full transition-all active:scale-95"
+                title="Cerrar (Esc)"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
+
+          {/* Área principal: Imagen + Botones laterales */}
+          <div className="flex-1 flex items-center justify-center relative w-full max-w-5xl mx-auto min-h-0">
+            {/* Botón Izquierda */}
+            {imagenesArray.length > 1 && !modalZoomed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  prevImage();
+                }}
+                className="absolute left-2 sm:left-4 z-20 bg-black/40 border border-white/10 hover:bg-white/15 text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-90 hover:border-white/30"
+                title="Imagen Anterior"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+            )}
+
+            {/* Contenedor de la Imagen con Zoom — overflow hidden estricto */}
+            <div 
+              className="relative w-full h-full max-w-4xl flex items-center justify-center overflow-hidden rounded-2xl"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxHeight: '75vh' }}
+            >
+              <img 
+                src={imagenActiva} 
+                alt={producto.nombre} 
+                draggable={false}
+                onClick={() => {
+                  setModalZoomed(!modalZoomed);
+                  if (modalZoomed) setModalZoomPos({ x: 50, y: 50 });
+                }}
+                onMouseMove={handleModalMouseMove}
+                onMouseLeave={() => {
+                  if (modalZoomed) setModalZoomPos({ x: 50, y: 50 });
+                }}
+                style={{
+                  transformOrigin: modalZoomed ? `${modalZoomPos.x}% ${modalZoomPos.y}%` : 'center',
+                }}
+                className={`w-full h-full object-contain select-none transition-transform duration-300 ease-out ${
+                  modalZoomed 
+                    ? 'scale-[2.5] cursor-grab active:cursor-grabbing' 
+                    : 'scale-100 cursor-zoom-in hover:scale-[1.02]'
+                }`}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
+                }}
+              />
+              {/* Indicador de zoom activo */}
+              {modalZoomed && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white/70 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full pointer-events-none border border-white/10">
+                  Zoom 2.5× · Mover ratón para explorar
+                </div>
+              )}
+            </div>
+
+            {/* Botón Derecha */}
+            {imagenesArray.length > 1 && !modalZoomed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nextImage();
+                }}
+                className="absolute right-2 sm:right-4 z-20 bg-black/40 border border-white/10 hover:bg-white/15 text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-90 hover:border-white/30"
+                title="Siguiente Imagen"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            )}
+          </div>
+
+          {/* Miniaturas al pie del modal */}
+          {imagenesArray.length > 1 && (
+            <div className="w-full py-3 flex justify-center gap-2.5 z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
+              {imagenesArray.map((url, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setImagenActiva(url);
+                    setModalZoomed(false);
+                    setModalZoomPos({ x: 50, y: 50 });
+                  }}
+                  className={`relative w-14 h-10 rounded-lg overflow-hidden border-2 transition-all flex-shrink-0 ${
+                    idx === currentIdx 
+                      ? 'border-themeAccent shadow-lg shadow-themeAccent/20 scale-110' 
+                      : 'border-white/10 hover:border-white/40 opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <img src={url} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

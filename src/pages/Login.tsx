@@ -10,18 +10,23 @@ type ModoFormulario = 'login' | 'registro' | 'recuperar';
 
 export default function Login() {
   const [modo, setModo] = useState<ModoFormulario>('login');
-  const [email, setEmail] = useState('');
+  const [identificador, setIdentificador] = useState(''); // Username o email para login, email para registro/recuperar
   const [password, setPassword] = useState('');
-  const [confirmarPassword, setConfirmarPassword] = useState(''); // 🆕 Doble validación
-  const [username, setUsername] = useState(''); // 🆕 Estado para el usuario
+  const [confirmarPassword, setConfirmarPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [verPassword, setVerPassword] = useState(false); // 🆕 Mostrar/ocultar contraseña
-  const [verConfirmarPassword, setVerConfirmarPassword] = useState(false); // 🆕 Mostrar/ocultar confirmación
+  const [verPassword, setVerPassword] = useState(false);
+  const [verConfirmarPassword, setVerConfirmarPassword] = useState(false);
 
   const { login, registro } = useAuth();
   const navigate = useNavigate();
+
+  // Detectar si el input parece un email
+  const esEmail = identificador.includes('@');
+  // Detectar si el input parece un username (sin @, no vacío)
+  const esUsername = identificador.trim().length > 0 && !esEmail;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,8 +36,15 @@ export default function Login() {
 
     try {
       if (modo === 'login') {
-        // 🔓 INICIAR SESIÓN
-        await login(email, password);
+        // 🔓 INICIAR SESIÓN — El AuthContext.login() maneja la resolución username→email
+        if (!identificador.trim()) {
+          throw new Error("Ingresa tu nombre de usuario o correo electrónico.");
+        }
+        if (!password) {
+          throw new Error("Ingresa tu contraseña.");
+        }
+        
+        await login(identificador, password);
         toast.success('¡Sesión iniciada!', {
           description: 'Te damos la bienvenida a NEXUS // CORE.',
           duration: 2500,
@@ -51,20 +63,23 @@ export default function Login() {
           throw new Error("Las contraseñas no coinciden. Por favor verifícalas.");
         }
         
-        await registro(email, password, username.trim());
+        await registro(identificador, password, username.trim());
         
         toast.success('¡Registro exitoso!', {
           description: `Bienvenido a NEXUS // CORE @${username.toLowerCase()}. Tu sesión ha sido iniciada.`,
           duration: 3500,
         });
         
-        // Mantener al usuario registrado logueado e ir a home directo
         navigate('/');
 
       } else if (modo === 'recuperar') {
         // 🔑 RECUPERAR CONTRASEÑA
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: 'http://localhost:5173/ajustes', // A donde lo mandará el correo
+        if (!identificador.includes('@')) {
+          throw new Error("Ingresa tu correo electrónico válido para recuperar tu contraseña.");
+        }
+        
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(identificador, {
+          redirectTo: `${window.location.origin}/ajustes`,
         });
         if (resetError) throw resetError;
 
@@ -75,10 +90,20 @@ export default function Login() {
         setMensajeExito('Te hemos enviado un correo con las instrucciones para cambiar tu contraseña.');
         setModo('login');
       }
-    } catch (err: any) {
-      const msg = err.message || 'Ocurrió un error al procesar la solicitud';
-      setError(msg);
-      toast.error('Error', { description: msg });
+    } catch (err) {
+      let errorMsg = err instanceof Error ? err.message : 'Ocurrió un error al procesar la solicitud';
+      
+      // Traducir errores comunes de Supabase al español
+      if (errorMsg.includes('Invalid login credentials')) {
+        errorMsg = 'Credenciales incorrectas. Verifica tu usuario/correo y contraseña.';
+      } else if (errorMsg.includes('Email not confirmed')) {
+        errorMsg = 'Tu correo aún no ha sido confirmado. Revisa tu bandeja de entrada.';
+      } else if (errorMsg.includes('User already registered')) {
+        errorMsg = 'Este correo electrónico ya está registrado. ¿Quieres iniciar sesión?';
+      }
+      
+      setError(errorMsg);
+      toast.error('Error', { description: errorMsg });
     } finally {
       setLoading(false);
     }
@@ -88,6 +113,7 @@ export default function Login() {
     setModo(nuevoModo);
     setError(null);
     setMensajeExito(null);
+    setIdentificador('');
     setPassword('');
     setConfirmarPassword('');
     setVerPassword(false);
@@ -120,7 +146,7 @@ export default function Login() {
             {modo === 'recuperar' && 'RECUPERAR'}
           </h2>
           <p className="text-themeTextMuted text-xs font-bold uppercase tracking-wider mt-1.5">
-            {modo === 'login' && 'Ingresa a NEXUS // CORE'}
+            {modo === 'login' && 'Ingresa con tu usuario o correo'}
             {modo === 'registro' && 'Regístrate e inicia sesión de inmediato'}
             {modo === 'recuperar' && 'Ingresa tu correo para resetear'}
           </p>
@@ -144,7 +170,7 @@ export default function Login() {
           
           {/* Campo: Username (SOLO EN REGISTRO) */}
           {modo === 'registro' && (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 animate-slide-down">
               <label className="block text-[10px] font-black text-themeText uppercase tracking-widest">
                 Nombre de usuario (Username)
               </label>
@@ -156,32 +182,51 @@ export default function Login() {
                   type="text"
                   required
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
                   className="w-full pl-11 pr-4 py-3 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-semibold placeholder-themeTextMuted/30 focus:outline-none focus:border-themeAccent focus:ring-2 focus:ring-themeAccent/10 transition-all"
                   placeholder="ej. kiev_builder"
+                  minLength={3}
+                  maxLength={20}
+                  autoComplete="username"
                 />
               </div>
+              <p className="text-[10px] text-themeTextMuted mt-0.5">
+                Sin espacios, mínimo 3 caracteres. Este será tu @usuario.
+              </p>
             </div>
           )}
 
-          {/* Campo: Correo (SIEMPRE VISIBLE) */}
+          {/* Campo: Identificador (Usuario o Correo en Login, Correo en Registro/Recuperar) */}
           <div className="space-y-1.5">
             <label className="block text-[10px] font-black text-themeText uppercase tracking-widest">
-              Correo Electrónico
+              {modo === 'login' ? 'Usuario o Correo Electrónico' : 'Correo Electrónico'}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-themeTextMuted">
-                <Mail size={16} />
+                {modo === 'login' && esUsername ? (
+                  <UserIcon size={16} className="text-themeAccent transition-colors duration-200" />
+                ) : modo === 'login' && esEmail ? (
+                  <Mail size={16} className="text-themeAccent transition-colors duration-200" />
+                ) : (
+                  <Mail size={16} />
+                )}
               </div>
               <input
-                type="email"
+                type={modo === 'login' ? 'text' : 'email'}
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={identificador}
+                onChange={(e) => setIdentificador(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-semibold placeholder-themeTextMuted/30 focus:outline-none focus:border-themeAccent focus:ring-2 focus:ring-themeAccent/10 transition-all"
-                placeholder="tu@email.com"
+                placeholder={modo === 'login' ? 'ej. kiev_builder o tu@email.com' : 'tu@email.com'}
+                autoComplete={modo === 'login' ? 'username' : 'email'}
               />
             </div>
+            {/* Indicador visual del modo detectado en login */}
+            {modo === 'login' && identificador.trim().length > 0 && (
+              <p className="text-[10px] font-bold mt-0.5 transition-colors duration-200" style={{ color: esEmail ? 'rgb(var(--theme-accent))' : 'rgb(var(--theme-text-muted))' }}>
+                {esEmail ? '📧 Detectado: correo electrónico' : `👤 Detectado: nombre de usuario "${identificador.replace(/^@/, '')}"`}
+              </p>
+            )}
           </div>
 
           {/* Campo: Contraseña (SOLO LOGIN Y REGISTRO) */}
@@ -214,6 +259,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-11 pr-11 py-3 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-semibold placeholder-themeTextMuted/30 focus:outline-none focus:border-themeAccent focus:ring-2 focus:ring-themeAccent/10 transition-all"
                   placeholder="••••••••"
+                  autoComplete={modo === 'login' ? 'current-password' : 'new-password'}
                 />
                 <button
                   type="button"
@@ -245,6 +291,7 @@ export default function Login() {
                   onChange={(e) => setConfirmarPassword(e.target.value)}
                   className="w-full pl-11 pr-11 py-3 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-semibold placeholder-themeTextMuted/30 focus:outline-none focus:border-themeAccent focus:ring-2 focus:ring-themeAccent/10 transition-all"
                   placeholder="••••••••"
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
@@ -255,6 +302,12 @@ export default function Login() {
                   {verConfirmarPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {/* Indicador de coincidencia de contraseñas */}
+              {confirmarPassword.length > 0 && (
+                <p className={`text-[10px] font-bold ${password === confirmarPassword ? 'text-emerald-500' : 'text-red-400'}`}>
+                  {password === confirmarPassword ? '✓ Las contraseñas coinciden' : '✗ Las contraseñas no coinciden'}
+                </p>
+              )}
             </div>
           )}
 
@@ -262,7 +315,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-themeAccent hover:bg-themeAccentHover text-white font-black py-3.5 px-4 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-themeAccent/15 text-xs uppercase tracking-widest mt-2 hover:shadow-themeAccent/35"
+            className="w-full bg-themeAccent hover:bg-themeAccentHover text-white font-black py-3.5 px-4 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-themeAccent/15 text-xs uppercase tracking-widest mt-2 hover:shadow-themeAccent/35 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : (
               modo === 'login' ? 'Iniciar Sesión' :

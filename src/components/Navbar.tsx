@@ -34,7 +34,7 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
     try {
       await logout();
       toast.success("Sesión cerrada correctamente");
-    } catch (err: any) {
+    } catch {
       toast.error("Error al cerrar sesión");
     }
   };
@@ -55,7 +55,7 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
           {/* Acciones */}
           <div className="flex items-center gap-2 md:gap-3">
             
-            {/* 👤 Login / Perfil */}
+            {/* Login / Perfil */}
             {user ? (
               <div className="flex items-center gap-2 mr-2">
                 <span className="text-xs font-bold text-themeTextMuted hidden md:block">

@@ -46,9 +46,7 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
   const handleAgregar = () => {
     if (sinStock) return;
     
-    for (let i = 0; i < cantidad; i++) {
-      agregarProducto(producto);
-    }
+    agregarProducto(producto, cantidad);
     
     toast.success(`Añadido: ${cantidad}x ${producto.nombre} al carrito`, {
       description: "¡Listo para cotizar en tu carrito!",

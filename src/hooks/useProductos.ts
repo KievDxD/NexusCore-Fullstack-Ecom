@@ -1,38 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
+import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { type Producto } from './useCarrito';
 import { LISTA_PRODUCTOS } from '../data/productos';
 
+interface ProductosState {
+  productos: Producto[];
+  cargando: boolean;
+  fetchProductos: () => Promise<void>;
+}
+
+export const useProductosStore = create<ProductosState>((set) => ({
+  productos: [],
+  cargando: true,
+  fetchProductos: async () => {
+    set({ cargando: true });
+    try {
+      const { data, error } = await supabase
+        .from('productos')
+        .select('*')
+        .order('id', { ascending: true });
+      
+      if (error || !data || data.length === 0) {
+        console.warn("Usando catálogo local (fallback) debido a error o base de datos vacía");
+        set({ productos: LISTA_PRODUCTOS, cargando: false });
+      } else {
+        set({ productos: data || [], cargando: false });
+      }
+    } catch (err) {
+      console.error("Error inesperado en fetch de productos, usando fallback:", err);
+      set({ productos: LISTA_PRODUCTOS, cargando: false });
+    }
+  }
+}));
+
 export function useProductos() {
-  const [productos, setProductos] = useState<Producto[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const { productos, cargando, fetchProductos } = useProductosStore();
 
   useEffect(() => {
-    async function fetchProductos() {
-      try {
-        const { data, error } = await supabase
-          .from('productos')
-          .select('*')
-          .order('id', { ascending: true });
-        
-        if (error || !data || data.length === 0) {
-          console.warn("Usando catálogo local (fallback) debido a error o base de datos vacía");
-          setProductos(LISTA_PRODUCTOS);
-        } else {
-          setProductos(data || []);
-        }
-      } catch (err) {
-        console.error("Error inesperado en fetch de productos, usando fallback:", err);
-        setProductos(LISTA_PRODUCTOS);
-      } finally {
-        setCargando(false);
-      }
+    if (productos.length === 0) {
+      fetchProductos();
     }
-    fetchProductos();
-  }, []);
+  }, [productos.length, fetchProductos]);
 
-  // 🆕 Envolver en useCallback para evitar recreaciones de función en cada render
-  // y resolver el bucle infinito de carga en la página de detalle.
   const fetchProductoById = useCallback(async (id: number) => {
     try {
       // 1. Obtener producto con sus imágenes adicionales
@@ -66,9 +76,9 @@ export function useProductos() {
       return {
         producto: {
           ...producto,
-          imagenes: (producto.imagenes || []).sort((a: any, b: any) => a.orden - b.orden)
+          imagenes: ((producto.imagenes as unknown as Array<{ orden: number }>) || []).sort((a, b) => a.orden - b.orden)
         },
-        resenas: resError ? [] : (resenas as any[])
+        resenas: resError ? [] : (resenas as unknown as Array<{ id: number; puntuacion: number; comentario: string; created_at: string; profiles: { username: string; avatar_url: string } | null }>)
       };
     } catch (err) {
       console.warn(`Fallo fetch del producto #${id} en Supabase, usando fallback local:`, err);
@@ -76,14 +86,12 @@ export function useProductos() {
       const localProd = LISTA_PRODUCTOS.find(p => p.id === id);
       if (!localProd) return null;
       
-      // Galería mockeada con imágenes acordes al hardware
       const mockImages = [
         { id: 101, url: localProd.imagen, orden: 0 },
         { id: 102, url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=600", orden: 1 },
         { id: 103, url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?q=80&w=600", orden: 2 }
       ];
 
-      // Reseñas mockeadas
       const mockReviews = [
         {
           id: 1,
@@ -111,5 +119,5 @@ export function useProductos() {
     }
   }, []);
 
-  return { productos, cargando, fetchProductoById };
+  return { productos, cargando, fetchProductoById, refetchProductos: fetchProductos };
 }

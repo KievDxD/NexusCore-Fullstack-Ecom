@@ -23,7 +23,7 @@ export interface CartItem extends Producto {
 
 interface CarritoState {
   items: CartItem[];
-  agregarProducto: (producto: Producto) => void;
+  agregarProducto: (producto: Producto, cantidad?: number) => void;
   eliminarProducto: (id: number) => void;
   limpiarCarrito: () => void;
 }
@@ -33,19 +33,36 @@ export const useCarrito = create<CarritoState>()(
     (set) => ({
       items: [],
 
-      agregarProducto: (producto) => set((state) => {
+      agregarProducto: (producto, cantidad = 1) => set((state) => {
         const existe = state.items.find((item) => item.id === producto.id);
-        
+        const stock = producto.stock ?? 10;
+        const cantidadActual = existe ? existe.cantidad : 0;
+        const nuevaCantidad = cantidadActual + cantidad;
+
+        if (nuevaCantidad > stock) {
+          // Si supera el stock, limitamos a la cantidad máxima disponible
+          const cantPermitida = stock - cantidadActual;
+          if (cantPermitida <= 0) {
+            return state;
+          }
+          if (existe) {
+            return {
+              items: state.items.map((item) =>
+                item.id === producto.id ? { ...item, cantidad: stock } : item
+              ),
+            };
+          }
+          return { items: [...state.items, { ...producto, cantidad: stock }] };
+        }
+
         if (existe) {
-          // Buscamos el producto y le sumamos 1 a 'cantidad'
           return {
             items: state.items.map((item) =>
-              item.id === producto.id ? { ...item, cantidad: item.cantidad + 1 } : item
+              item.id === producto.id ? { ...item, cantidad: nuevaCantidad } : item
             ),
           };
         }
-        // Si es nuevo, lo metemos con cantidad inicial de 1
-        return { items: [...state.items, { ...producto, cantidad: 1 }] };
+        return { items: [...state.items, { ...producto, cantidad: cantidad }] };
       }),
 
       eliminarProducto: (id) => set((state) => ({

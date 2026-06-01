@@ -6,10 +6,13 @@ interface AuthContextType {
   user: User | null;
   role: 'admin' | 'usuario' | null;
   username: string | null;
+  avatarUrl: string | null;
   isAdmin: boolean;
-  login: (email: string, pass: string) => Promise<void>;
+  login: (emailOrUsername: string, pass: string) => Promise<void>;
   registro: (email: string, pass: string, username: string) => Promise<void>;
   actualizarUsername: (nuevoUsername: string) => Promise<void>;
+  actualizarAvatar: (nuevoAvatarUrl: string) => Promise<void>;
+  subirAvatar: (file: File) => Promise<string>;
   logout: () => Promise<void>;
   cargando: boolean; // Para evitar que la pantalla parpadee mientras valida
 }
@@ -20,80 +23,137 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<'admin' | 'usuario' | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, email?: string) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('role, username')
+        .select('role, username, avatar_url')
         .eq('id', userId)
         .single();
       
       if (error) {
-        console.error("Error al obtener perfil:", error.message);
-        setRole('usuario');
-        setUsername(null);
+        console.warn("Error al obtener perfil, usando valores locales o por defecto:", error.message);
+        setRole(prev => prev || 'usuario');
+        setUsername(prev => prev || (email ? email.split('@')[0] : 'usuario'));
+        setAvatarUrl(prev => prev || `https://api.dicebear.com/7.x/bottts/svg?seed=${userId}`);
       } else if (data) {
         setRole(data.role as 'admin' | 'usuario');
         setUsername(data.username);
+        setAvatarUrl(data.avatar_url);
       }
     } catch (err) {
       console.error("Error inesperado al cargar perfil:", err);
-      setRole('usuario');
-      setUsername(null);
+      setRole(prev => prev || 'usuario');
     }
   };
 
   useEffect(() => {
-    // 1. Revisar si hay un usuario logueado al cargar la página
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    let active = true;
+
+    // Escuchar cambios de autenticación (se dispara con INITIAL_SESSION inmediatamente en v2)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("onAuthStateChange event:", event);
       const currentUser = session?.user ?? null;
+      
+      if (!active) return;
+      
       setUser(currentUser);
       if (currentUser) {
-        await fetchProfile(currentUser.id);
+        await fetchProfile(currentUser.id, currentUser.email);
       } else {
         setRole(null);
         setUsername(null);
+        setAvatarUrl(null);
       }
-      setCargando(false);
+      
+      if (active) {
+        setCargando(false);
+      }
     });
 
-    // 2. Quedarse "escuchando" si el usuario entra o sale en tiempo real
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      if (currentUser) {
-        await fetchProfile(currentUser.id);
-      } else {
-        setRole(null);
-        setUsername(null);
+    // Salvaguarda para evitar cargas infinitas si la base de datos tarda en responder o no hay conexión
+    const timeoutId = setTimeout(() => {
+      if (active && cargando) {
+        console.warn("Tiempo de espera de inicialización agotado. Forzando cargando a false.");
+        setCargando(false);
       }
-      setCargando(false);
-    });
+    }, 2500);
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const login = async (email: string, pass: string) => {
+  const login = async (emailOrUsername: string, pass: string) => {
+    let identifier = emailOrUsername.trim();
+    // Quitar @ si el usuario lo ingresó al inicio del username
+    if (identifier.startsWith('@')) {
+      identifier = identifier.substring(1);
+    }
+    let resolvedEmail = identifier;
+
+    // Si no contiene un '@', asumimos que es un username y buscamos su email
+    if (!identifier.includes('@')) {
+      const { data: email, error: rpcError } = await supabase.rpc('get_email_by_username', {
+        username_to_find: identifier
+      });
+
+      if (rpcError) {
+        console.error("Error al resolver username por RPC:", rpcError.message);
+      }
+
+      if (!email) {
+        throw new Error(`El nombre de usuario o correo "${emailOrUsername}" no está registrado.`);
+      }
+      resolvedEmail = email;
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: resolvedEmail,
       password: pass,
     });
 
     if (error) throw error;
     setUser(data.user);
     if (data.user) {
-      await fetchProfile(data.user.id);
+      await fetchProfile(data.user.id, data.user.email);
     }
   };
 
   const registro = async (email: string, pass: string, usernameStr: string) => {
+    const cleanUsername = usernameStr.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Pre-validar en base de datos usando la RPC unificada
+    const { data: checkData, error: checkError } = await supabase.rpc('check_user_exists', {
+      email_to_check: cleanEmail,
+      username_to_check: cleanUsername
+    });
+
+    if (checkError) {
+      console.warn("Fallo al pre-validar credenciales en base de datos:", checkError.message);
+    } else if (checkData && checkData.length > 0) {
+      const { email_exists, username_exists } = checkData[0] as { email_exists: boolean, username_exists: boolean };
+      if (email_exists) {
+        throw new Error(`El correo electrónico "${cleanEmail}" ya está registrado.`);
+      }
+      if (username_exists) {
+        throw new Error(`El nombre de usuario "@${cleanUsername}" ya está en uso.`);
+      }
+    }
+
+    // 2. Ejecutar registro de Supabase
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: cleanEmail,
       password: pass,
       options: {
-        data: { username: usernameStr.toLowerCase() }
+        data: { username: cleanUsername }
       }
     });
 
@@ -104,27 +164,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
       // Garantizar que la UI se actualice inmediatamente con los datos locales de registro
       setRole('usuario');
-      setUsername(usernameStr.toLowerCase());
+      setUsername(cleanUsername);
+      setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${data.user.id}`);
 
-      // Intentar guardar en base de datos (por si no hay trigger activo)
-      // Pero no bloqueamos la experiencia de usuario si falla por duplicado/RLS del trigger
-      supabase
-        .from('profiles')
-        .insert([
-          { 
-            id: data.user.id, 
-            username: usernameStr.toLowerCase(), 
-            role: 'usuario',
-            avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${data.user.id}`
-          }
-        ])
-        .then(({ error: profileError }) => {
-          if (profileError) {
-            console.log("El disparador de base de datos ya insertó el perfil.");
-            // Verificar si el rol real en BD es diferente
-            fetchProfile(data.user!.id);
-          }
-        });
+      // Sincronizar el perfil real desde la base de datos (creado por el trigger)
+      await fetchProfile(data.user.id, data.user.email);
     }
   };
 
@@ -180,10 +224,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // 3. Sincronizar estado local inmediatamente
       setUsername(cleanUsername);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error al actualizar username:", err);
-      if (err.message) throw err;
-      throw new Error('Error inesperado al actualizar el username. Intenta de nuevo.');
+      const error = err instanceof Error ? err : new Error(String(err));
+      throw new Error(error.message || 'Error inesperado al actualizar el username. Intenta de nuevo.', { cause: err });
+    }
+  };
+
+  const actualizarAvatar = async (nuevoAvatarUrl: string) => {
+    if (!user) throw new Error('No hay sesión activa.');
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ avatar_url: nuevoAvatarUrl })
+        .eq('id', user.id);
+
+      if (error) throw error;
+      setAvatarUrl(nuevoAvatarUrl);
+    } catch (err) {
+      console.error("Error al actualizar avatar:", err);
+      const error = err instanceof Error ? err : new Error(String(err));
+      throw new Error(error.message || 'Error inesperado al actualizar el avatar.', { cause: err });
+    }
+  };
+
+  const subirAvatar = async (file: File): Promise<string> => {
+    if (!user) throw new Error('No hay sesión activa.');
+
+    try {
+      const fileExt = file.name.split('.').pop() || 'jpg';
+      const filePath = `${user.id}/avatar-${Date.now()}.${fileExt}`;
+
+      // Subir archivo al bucket de avatars
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Obtener la URL pública del archivo
+      const { data } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const publicUrl = data.publicUrl;
+
+      // Actualizar la base de datos con la nueva URL
+      await actualizarAvatar(publicUrl);
+
+      return publicUrl;
+    } catch (err) {
+      console.error("Error al subir avatar:", err);
+      const error = err instanceof Error ? err : new Error(String(err));
+      throw new Error(error.message || 'Error inesperado al subir la imagen.', { cause: err });
     }
   };
 
@@ -192,17 +289,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setRole(null);
     setUsername(null);
+    setAvatarUrl(null);
   };
 
   const isAdmin = role === 'admin';
 
   return (
-    <AuthContext.Provider value={{ user, role, username, isAdmin, login, registro, actualizarUsername, logout, cargando }}>
-      {!cargando && children} 
+    <AuthContext.Provider value={{ user, role, username, avatarUrl, isAdmin, login, registro, actualizarUsername, actualizarAvatar, subirAvatar, logout, cargando }}>
+      {cargando ? (
+        <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white z-999">
+          <div className="w-12 h-12 border-4 border-t-indigo-500 border-zinc-800 rounded-full animate-spin mb-4"></div>
+          <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest animate-pulse">Iniciando NEXUS // CORE...</p>
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth debe usarse dentro de AuthProvider');

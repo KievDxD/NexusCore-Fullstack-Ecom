@@ -3,6 +3,8 @@ import { useSettings } from '../hooks/useSettings';
 import { convertPrice, formatCurrency } from '../utils/currency';
 import { X, Trash2, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase';
+import { useProductos } from '../hooks/useProductos';
 
 interface CarritoSidebarProps {
   isOpen: boolean;
@@ -12,6 +14,7 @@ interface CarritoSidebarProps {
 export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps) {
   const { items, eliminarProducto, limpiarCarrito } = useCarrito();
   const { currency, rates, whatsappNumber } = useSettings();
+  const { refetchProductos } = useProductos();
 
   // 💰 Calcular el precio total acumulado
   const totalOriginal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
@@ -19,28 +22,61 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
   const totalFormateado = formatCurrency(totalConvertido, currency);
 
   // 📱 Función para armar el mensaje de texto y mandarlo a WhatsApp
-  const enviarPedidoWhatsApp = () => {
+  const enviarPedidoWhatsApp = async () => {
     if (items.length === 0) return;
 
-    let mensaje = `👋 ¡Hola! Me gustaría realizar el siguiente pedido:\n\n`;
-    
-    items.forEach((item) => {
-      const precioItemConvertido = convertPrice(item.precio, currency, rates);
-      const precioItemFormateado = formatCurrency(precioItemConvertido, currency);
-      mensaje += `▪ *${item.cantidad}x* ${item.nombre} — (${precioItemFormateado} c/u)\n`;
-    });
+    // 1. Preparar datos para validar y descontar stock en la base de datos
+    const itemsParaDescontar = items.map((item) => ({
+      id: item.id,
+      cantidad: item.cantidad
+    }));
 
-    mensaje += `\n💰 *Total del Pedido:* ${totalFormateado}`;
-    mensaje += `\n\n💵 *Moneda de pago elegida:* ${currency}`;
+    try {
+      toast.loading("Procesando pedido y verificando stock...", { id: "checkout" });
+      
+      const { error: checkoutError } = await supabase.rpc('finalizar_compra', {
+        items_json: itemsParaDescontar
+      });
 
-    // Codificamos el texto para que sea válido dentro de un enlace URL
-    const mensajeCodificado = encodeURIComponent(mensaje);
-    
-    // Usamos el número guardado en la configuración o el fallback
-    const numeroTelefono = whatsappNumber || "573043104831"; 
-    
-    toast.success("Redirigiendo a WhatsApp para finalizar tu pedido...");
-    window.open(`https://wa.me/${numeroTelefono}?text=${mensajeCodificado}`, '_blank');
+      if (checkoutError) {
+        console.error("Error al finalizar compra:", checkoutError.message);
+        toast.error("No se pudo procesar la compra", {
+          id: "checkout",
+          description: checkoutError.message || "Por favor, revisa el stock disponible."
+        });
+        return;
+      }
+
+      // 2. Si la transacción en base de datos es exitosa, armar el mensaje de WhatsApp
+      let mensaje = `👋 ¡Hola! Me gustaría realizar el siguiente pedido:\n\n`;
+      
+      items.forEach((item) => {
+        const precioItemConvertido = convertPrice(item.precio, currency, rates);
+        const precioItemFormateado = formatCurrency(precioItemConvertido, currency);
+        mensaje += `▪ *${item.cantidad}x* ${item.nombre} — (${precioItemFormateado} c/u)\n`;
+      });
+
+      mensaje += `\n💰 *Total del Pedido:* ${totalFormateado}`;
+      mensaje += `\n\n💵 *Moneda de pago elegida:* ${currency}`;
+
+      // Codificamos el texto para que sea válido dentro de un enlace URL
+      const mensajeCodificado = encodeURIComponent(mensaje);
+      
+      // Usamos el número guardado en la configuración o el fallback
+      const numeroTelefono = whatsappNumber || "573043104831"; 
+      
+      toast.success("¡Stock reservado con éxito! Redirigiendo a WhatsApp...", { id: "checkout" });
+      window.open(`https://wa.me/${numeroTelefono}?text=${mensajeCodificado}`, '_blank');
+      
+      // 3. Limpiar carrito local, actualizar stock y cerrar barra lateral
+      limpiarCarrito();
+      await refetchProductos();
+      onClose();
+
+    } catch (err) {
+      console.error("Error inesperado en checkout:", err);
+      toast.error("Error inesperado al conectar con el servidor.", { id: "checkout" });
+    }
   };
 
   const handleEliminarProducto = (id: number, nombre: string) => {
