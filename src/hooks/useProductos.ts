@@ -87,7 +87,7 @@ export function useProductos() {
         .eq('producto_id', id)
         .order('orden', { ascending: true });
         
-      if (imgs && imgs.length > 0) {
+      if (finalProducto && imgs && imgs.length > 0) {
         finalProducto.imagenes = imgs;
       }
     }
