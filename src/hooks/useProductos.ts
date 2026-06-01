@@ -23,13 +23,15 @@ export const useProductosStore = create<ProductosState>((set) => ({
       
       if (error || !data || data.length === 0) {
         console.warn("Usando catálogo local (fallback) debido a error o base de datos vacía");
-        set({ productos: LISTA_PRODUCTOS, cargando: false });
+        set({ productos: LISTA_PRODUCTOS });
       } else {
-        set({ productos: data || [], cargando: false });
+        set({ productos: data || [] });
       }
     } catch (err) {
       console.error("Error inesperado en fetch de productos, usando fallback:", err);
-      set({ productos: LISTA_PRODUCTOS, cargando: false });
+      set({ productos: LISTA_PRODUCTOS });
+    } finally {
+      set({ cargando: false });
     }
   }
 }));
@@ -44,79 +46,100 @@ export function useProductos() {
   }, [productos.length, fetchProductos]);
 
   const fetchProductoById = useCallback(async (id: number) => {
-    try {
-      // 1. Obtener producto con sus imágenes adicionales
-      const { data: producto, error: prodError } = await supabase
-        .from('productos')
-        .select(`
-          *,
-          imagenes: producto_imagenes(id, url, orden)
-        `)
-        .eq('id', id)
-        .single();
+    let finalProducto: Producto | null;
+    let finalResenas: Array<{ id: number; puntuacion: number; comentario: string; created_at: string; profiles: { username: string; avatar_url: string } | null }>;
+
+    // 1. Obtener producto principal
+    const { data: producto, error: prodError } = await supabase
+      .from('productos')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (prodError || !producto) {
+      console.warn(`Fallo al obtener producto #${id} desde Supabase:`, prodError);
+      const localProd = LISTA_PRODUCTOS.find(p => p.id === id);
+      if (!localProd) return null;
+      finalProducto = { ...localProd, imagenes: [{ id: 0, url: localProd.imagen, orden: 0 }] };
+    } else {
+      finalProducto = { ...producto, imagenes: [{ id: 0, url: producto.imagen, orden: 0 }] };
       
-      if (prodError || !producto) {
-        throw prodError || new Error("Producto no encontrado");
+      // Intentar obtener imágenes adicionales por separado (por si la relación falla)
+      const { data: imgs } = await supabase
+        .from('producto_imagenes')
+        .select('id, url, orden')
+        .eq('producto_id', id)
+        .order('orden', { ascending: true });
+        
+      if (imgs && imgs.length > 0) {
+        finalProducto.imagenes = imgs;
       }
+    }
+
+    const { data: resenas, error: resError } = await supabase
+      .from('resenas')
+      .select(`
+        id,
+        puntuacion,
+        comentario,
+        created_at,
+        user_id,
+        profiles(username, avatar_url)
+      `)
+      .eq('producto_id', id)
+      .order('created_at', { ascending: false });
+
+    if (resError) {
+      console.warn("Fallo al obtener reseñas con perfiles, intentando sin join:", resError);
       
-      // 2. Obtener reseñas del producto con el perfil del autor
-      const { data: resenas, error: resError } = await supabase
+      // Fallback: Intentar obtener reseñas sin el join a profiles
+      const { data: resenasFallback, error: resErrorFallback } = await supabase
         .from('resenas')
         .select(`
           id,
           puntuacion,
           comentario,
           created_at,
-          user_id,
-          profiles(username, avatar_url)
+          user_id
         `)
         .eq('producto_id', id)
         .order('created_at', { ascending: false });
-
-      return {
-        producto: {
-          ...producto,
-          imagenes: ((producto.imagenes as unknown as Array<{ orden: number }>) || []).sort((a, b) => a.orden - b.orden)
-        },
-        resenas: resError ? [] : (resenas as unknown as Array<{ id: number; puntuacion: number; comentario: string; created_at: string; profiles: { username: string; avatar_url: string } | null }>)
-      };
-    } catch (err) {
-      console.warn(`Fallo fetch del producto #${id} en Supabase, usando fallback local:`, err);
-      
-      const localProd = LISTA_PRODUCTOS.find(p => p.id === id);
-      if (!localProd) return null;
-      
-      const mockImages = [
-        { id: 101, url: localProd.imagen, orden: 0 },
-        { id: 102, url: "https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=600", orden: 1 },
-        { id: 103, url: "https://images.unsplash.com/photo-1563770660941-20978e870e26?q=80&w=600", orden: 2 }
-      ];
-
-      const mockReviews = [
-        {
-          id: 1,
-          puntuacion: 5,
-          comentario: "Una excelente adición a mi torre gamer. Funciona extremadamente estable y mantiene temperaturas bajas.",
-          created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-          profiles: { username: "kiev_gamer", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=1" }
-        },
-        {
-          id: 2,
-          puntuacion: 4,
-          comentario: "Muy buena calidad de construcción, la marca es de total confianza.",
-          created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-          profiles: { username: "nexus_builder", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=2" }
+        
+      if (resErrorFallback) {
+        console.error("Error definitivo al obtener reseñas del producto:", resErrorFallback);
+        finalResenas = [];
+      } else {
+        // Extraer los user_ids que existan
+        const userIds = resenasFallback.map((r: { user_id: string }) => r.user_id).filter(Boolean);
+        const uniqueUserIds = [...new Set(userIds)];
+        
+        const profilesMap: Record<string, { id: string; username: string; avatar_url: string }> = {};
+        
+        if (uniqueUserIds.length > 0) {
+          // Obtener los perfiles manualmente para evadir el error de relación
+          const { data: perfiles } = await supabase
+            .from('profiles')
+            .select('id, username, avatar_url')
+            .in('id', uniqueUserIds);
+            
+          if (perfiles) {
+            perfiles.forEach(p => { profilesMap[p.id] = p; });
+          }
         }
-      ];
-
-      return {
-        producto: {
-          ...localProd,
-          imagenes: mockImages
-        },
-        resenas: mockReviews
-      };
+        
+        finalResenas = (resenasFallback || []).map((r: { id: number; puntuacion: number; comentario: string; created_at: string; user_id: string }) => ({ 
+          ...r, 
+          profiles: r.user_id && profilesMap[r.user_id] ? profilesMap[r.user_id] : null 
+        }));
+      }
+    } else {
+      finalResenas = resenas || [];
     }
+
+    return {
+      producto: finalProducto,
+      resenas: finalResenas as unknown as Array<{ id: number; puntuacion: number; comentario: string; created_at: string; profiles: { username: string; avatar_url: string } | null }>
+    };
   }, []);
 
   return { productos, cargando, fetchProductoById, refetchProductos: fetchProductos };

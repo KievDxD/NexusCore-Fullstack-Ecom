@@ -1,12 +1,6 @@
--- ==========================================
--- SCRIPT DE BASE DE DATOS SUPABASE - NEXUS//CORE
--- Ejecuta este script completo en el editor SQL de Supabase (SQL Editor)
--- ==========================================
 
--- 1. Habilitar la extensión UUID si no está
 create extension if not exists "uuid-ossp";
 
--- 2. Crear tabla de perfiles (Profiles) vinculada a Auth.Users
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   username text unique not null,
@@ -16,13 +10,10 @@ create table if not exists public.profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Asegurar unicidad del username insensible a mayúsculas/minúsculas
 create unique index if not exists profiles_username_lower_idx on public.profiles (lower(username));
 
--- Habilitar RLS en perfiles
 alter table public.profiles enable row level security;
 
--- Políticas de RLS para Profiles
 drop policy if exists "Cualquier persona puede ver perfiles" on public.profiles;
 drop policy if exists "Los usuarios pueden editar su propio perfil" on public.profiles;
 drop policy if exists "Los usuarios pueden insertar su propio perfil" on public.profiles;
@@ -36,7 +27,6 @@ create policy "Los usuarios pueden editar su propio perfil" on public.profiles
 create policy "Los usuarios pueden insertar su propio perfil" on public.profiles
   for insert with check (auth.uid() = id);
 
--- 3. Trigger automático para crear perfil cuando alguien se registra (security definer)
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -52,13 +42,11 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- Crear el trigger
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
--- 3.1. Disparador de validación antes del registro (before insert on auth.users)
 create or replace function public.validate_signup()
 returns trigger as $$
 declare
@@ -67,22 +55,19 @@ declare
 begin
   username_val := lower(trim(new.raw_user_meta_data->>'username'));
   email_val := lower(trim(new.email));
-  
-  -- 1. Validar que el username tenga longitud adecuada si viene especificado
+
   if username_val is null or length(username_val) < 3 then
     raise exception 'El nombre de usuario debe tener al menos 3 caracteres.';
   end if;
-  
-  -- 2. Validar que el username no esté ya registrado en la tabla profiles
+
   if exists (select 1 from public.profiles where lower(username) = username_val) then
     raise exception 'El nombre de usuario "@%" ya está registrado por otro usuario.', new.raw_user_meta_data->>'username';
   end if;
-  
-  -- 3. Validar que el correo no esté ya registrado en auth.users
+
   if exists (select 1 from auth.users where lower(email) = email_val) then
     raise exception 'El correo electrónico "%" ya está registrado.', new.email;
   end if;
-  
+
   return new;
 end;
 $$ language plpgsql security definer;
@@ -92,7 +77,6 @@ create trigger on_auth_user_signup_validation
   before insert on auth.users
   for each row execute procedure public.validate_signup();
 
--- 3.2. Función RPC para chequeo previo unificado y rápido desde el cliente
 create or replace function public.check_user_exists(email_to_check text, username_to_check text)
 returns table(email_exists boolean, username_exists boolean) as $$
 begin
@@ -103,28 +87,28 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- 3.2.1. Función RPC para resolver el correo electrónico asociado a un nombre de usuario
 create or replace function public.get_email_by_username(username_to_find text)
 returns text as $$
 declare
   user_email text;
 begin
   select email into user_email
-  from public.profiles
-  where lower(username) = lower(trim(username_to_find));
+  from auth.users
+  where id = (
+    select id from public.profiles
+    where lower(username) = lower(trim(username_to_find))
+    limit 1
+  );
   return user_email;
 end;
 $$ language plpgsql security definer;
 
--- 3.3. Creación y Aseguramiento del Bucket de Storage de Avatares y sus políticas RLS
 insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
 
--- Asegurar RLS en los objetos de storage
 alter table storage.objects enable row level security;
 
--- Eliminar políticas viejas para evitar duplicados
 drop policy if exists "Cualquier persona puede ver avatars" on storage.objects;
 drop policy if exists "Los usuarios pueden subir sus propios avatares" on storage.objects;
 drop policy if exists "Los usuarios pueden actualizar sus propios avatares" on storage.objects;
@@ -154,7 +138,6 @@ create policy "Los usuarios pueden borrar sus propios avatares" on storage.objec
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
--- 4. Recrear o modificar la tabla de Productos para añadir campos de e-commerce premium
 drop table if exists public.productos cascade;
 create table public.productos (
   id bigint generated by default as identity primary key,
@@ -170,10 +153,8 @@ create table public.productos (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Habilitar RLS en Productos
 alter table public.productos enable row level security;
 
--- Políticas RLS para Productos
 create policy "Cualquier persona puede ver productos" on public.productos
   for select using (true);
 
@@ -185,7 +166,6 @@ create policy "Solo administradores pueden modificar productos" on public.produc
     )
   );
 
--- 5. Crear tabla para galería de fotos adicionales por producto
 create table if not exists public.producto_imagenes (
   id bigint generated by default as identity primary key,
   producto_id bigint references public.productos on delete cascade,
@@ -193,7 +173,6 @@ create table if not exists public.producto_imagenes (
   orden integer default 0
 );
 
--- Habilitar RLS en Imágenes
 alter table public.producto_imagenes enable row level security;
 
 create policy "Cualquier persona puede ver imágenes adicionales" on public.producto_imagenes
@@ -207,7 +186,6 @@ create policy "Solo administradores pueden modificar imágenes adicionales" on p
     )
   );
 
--- 6. Crear tabla para reseñas de productos (Reviews)
 create table if not exists public.resenas (
   id bigint generated by default as identity primary key,
   producto_id bigint references public.productos on delete cascade,
@@ -217,15 +195,12 @@ create table if not exists public.resenas (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Asegurar la relación de clave foránea entre resenas y profiles por si la tabla ya existía
 alter table public.resenas 
   drop constraint if exists resenas_user_id_fkey,
   add constraint resenas_user_id_fkey foreign key (user_id) references public.profiles(id) on delete cascade;
 
--- Habilitar RLS en Reseñas
 alter table public.resenas enable row level security;
 
--- Políticas RLS para Reseñas
 drop policy if exists "Cualquier persona puede ver reseñas" on public.resenas;
 drop policy if exists "Usuarios autenticados pueden crear reseñas" on public.resenas;
 drop policy if exists "Usuarios pueden borrar su propia reseña" on public.resenas;
@@ -242,7 +217,6 @@ create policy "Usuarios pueden borrar su propia reseña" on public.resenas
     where id = auth.uid() and role = 'admin'
   ));
 
--- 6.1. Función RPC para finalizar la compra y verificar/descontar stock de forma segura (con transacciones y bloqueos de fila)
 create or replace function public.finalizar_compra(items_json jsonb)
 returns void as $$
 declare
@@ -250,23 +224,21 @@ declare
   prod_stock integer;
   prod_nombre text;
 begin
-  -- 1. Validar stock de todos los productos primero (Bloqueo preventivo de fila mediante FOR UPDATE)
   for item in select * from jsonb_to_recordset(items_json) as x(id bigint, cantidad integer) loop
     select stock, nombre into prod_stock, prod_nombre
     from public.productos
     where id = item.id
     for update;
-    
+
     if prod_nombre is null then
       raise exception 'El producto con ID % no existe.', item.id;
     end if;
-    
+
     if prod_stock < item.cantidad then
       raise exception 'Stock insuficiente para el producto "%". Stock disponible: %, Solicitado: %', prod_nombre, prod_stock, item.cantidad;
     end if;
   end loop;
 
-  -- 2. Descontar el stock si todos están validados con éxito
   for item in select * from jsonb_to_recordset(items_json) as x(id bigint, cantidad integer) loop
     update public.productos
     set stock = stock - item.cantidad
@@ -275,58 +247,66 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- ==========================================
--- INSERTAR LOS 12 PRODUCTOS DE HARDWARE PREMIUM (TORRES)
--- ==========================================
-
 INSERT INTO public.productos (id, nombre, precio, imagen, categoria, descripcion, descripcion_larga, marca, stock, especificaciones) VALUES
-(1, 'Procesador AMD Ryzen 7 5800X', 899000, 'https://images.unsplash.com/photo-1591488320449-011701bb6704?q=80&w=600', 'Componentes', 'Procesador de alta gama de 8 núcleos y 16 hilos ideal para streaming, productividad y gaming ultra fluido.', 'El procesador AMD Ryzen 7 5800X ofrece el máximo rendimiento en juegos de ritmo rápido y exigentes programas multitarea. Con su arquitectura Zen 3 de 7nm, proporciona una eficiencia energética y potencia sin precedentes en su clase.', 'AMD', 12, '{"Zócalo": "AM4", "Núcleos": "8", "Hilos": "16", "Frecuencia Base": "3.8 GHz", "Frecuencia Turbo": "4.7 GHz", "TDP": "105W"}'),
+(1, 'Procesador AMD Ryzen 7 5800X', 899000, 'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?q=80&w=600', 'Componentes', 'Procesador de alta gama de 8 núcleos y 16 hilos ideal para streaming, productividad y gaming ultra fluido.', 'El procesador AMD Ryzen 7 5800X ofrece el máximo rendimiento en juegos de ritmo rápido y exigentes programas multitarea. Con su arquitectura Zen 3 de 7nm, proporciona una eficiencia energética y potencia sin precedentes en su clase.', 'AMD', 12, '{"Zócalo": "AM4", "Núcleos": "8", "Hilos": "16", "Frecuencia Base": "3.8 GHz", "Frecuencia Turbo": "4.7 GHz", "TDP": "105W"}'),
 
-(2, 'Procesador Intel Core i5-13400F', 749000, 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600', 'Componentes', 'Procesador inteligente híbrido de 10 núcleos y 16 hilos, con excelente relación calidad/precio.', 'El Intel Core i5-13400F combina núcleos de rendimiento (P-cores) y de eficiencia (E-cores) para ofrecer rendimiento ágil e inteligente en multitarea, juegos competitivos y tareas cotidianas exigentes, sin gráficos integrados.', 'Intel', 18, '{"Zócalo": "LGA1700", "Núcleos": "10 (6P + 4E)", "Hilos": "16", "Frecuencia Base": "2.5 GHz", "Frecuencia Turbo": "4.6 GHz", "Caché": "20 MB L3"}'),
+(2, 'Procesador Intel Core i5-13400F', 749000, 'https://images.unsplash.com/photo-1591488320449-011701bb6704?q=80&w=600', 'Componentes', 'Procesador inteligente híbrido de 10 núcleos y 16 hilos, con excelente relación calidad/precio.', 'El Intel Core i5-13400F combina núcleos de rendimiento (P-cores) y de eficiencia (E-cores) para ofrecer rendimiento ágil e inteligente en multitarea, juegos competitivos y tareas cotidianas exigentes, sin gráficos integrados.', 'Intel', 18, '{"Zócalo": "LGA1700", "Núcleos": "10 (6P + 4E)", "Hilos": "16", "Frecuencia Base": "2.5 GHz", "Frecuencia Turbo": "4.6 GHz", "Caché": "20 MB L3"}'),
 
-(3, 'Tarjeta Gráfica NVIDIA RTX 4060 8GB', 1650000, 'https://images.unsplash.com/photo-1614624532983-4ce03382d63d?q=80&w=600', 'Componentes', 'Tarjeta gráfica de última generación con DLSS 3 y Ray Tracing avanzado para gaming en 1080p y 1440p.', 'La tarjeta de video GeForce RTX 4060 ofrece un rendimiento increíble con la arquitectura ultra eficiente Ada Lovelace de NVIDIA. Disfruta de mundos virtuales hiper detallados con trazado de rayos (Ray Tracing) y el revolucionario multiplicador de rendimiento DLSS 3.', 'NVIDIA', 5, '{"Memoria VRAM": "8GB GDDR6", "Interfaz": "128-bit", "Puertos": "3x DisplayPort, 1x HDMI", "Consumo": "115W", "Tecnología": "DLSS 3, Ray Tracing"}'),
+(3, 'Tarjeta Gráfica NVIDIA RTX 4060 8GB', 1650000, 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=600', 'Componentes', 'Tarjeta gráfica de última generación con DLSS 3 y Ray Tracing avanzado para gaming en 1080p y 1440p.', 'La tarjeta de video GeForce RTX 4060 ofrece un rendimiento increíble con la arquitectura ultra eficiente Ada Lovelace de NVIDIA. Disfruta de mundos virtuales hiper detallados con trazado de rayos (Ray Tracing) y el revolucionario multiplicador de rendimiento DLSS 3.', 'NVIDIA', 5, '{"Memoria VRAM": "8GB GDDR6", "Interfaz": "128-bit", "Puertos": "3x DisplayPort, 1x HDMI", "Consumo": "115W", "Tecnología": "DLSS 3, Ray Tracing"}'),
 
-(4, 'Tarjeta Madre ASUS TUF B550M-PLUS', 520000, 'https://images.unsplash.com/photo-1562976540-1502c2145186?q=80&w=600', 'Componentes', 'Tarjeta madre Micro-ATX duradera y resistente, optimizada para procesadores AMD Ryzen.', 'ASUS TUF Gaming B550M-Plus destila elementos esenciales de la última plataforma de AMD y los combina con características listas para el juego y durabilidad comprobada. Diseñada con componentes de grado militar, VRM mejorado y refrigeración integral.', 'ASUS', 8, '{"Factor de forma": "Micro-ATX", "Socket": "AM4", "Chipset": "AMD B550", "Memoria Máxima": "128GB DDR4", "Puertos M.2": "2x PCIe Gen 4/3", "Red": "2.5Gb Ethernet"}'),
+(4, 'Tarjeta Madre ASUS TUF B550M-PLUS', 520000, 'https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=600', 'Componentes', 'Tarjeta madre Micro-ATX duradera y resistente, optimizada para procesadores AMD Ryzen.', 'ASUS TUF Gaming B550M-Plus destila elementos esenciales de la última plataforma de AMD y los combina con características listas para el juego y durabilidad comprobada. Diseñada con componentes de grado militar, VRM mejorado y refrigeración integral.', 'ASUS', 8, '{"Factor de forma": "Micro-ATX", "Socket": "AM4", "Chipset": "AMD B550", "Memoria Máxima": "128GB DDR4", "Puertos M.2": "2x PCIe Gen 4/3", "Red": "2.5Gb Ethernet"}'),
 
-(5, 'RAM Corsair Vengeance RGB 16GB DDR4', 185000, 'https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=600', 'Componentes', 'Kit de memoria RAM de alto rendimiento con iluminación dinámica RGB multizona y diseño térmico de aluminio.', 'Corsair Vengeance RGB PRO Series DDR4 ilumina tu PC con una luz espectacular multizona direccionable individualmente, a la vez que ofrece el mejor rendimiento y estabilidad en overclocking de memorias DDR4.', 'Corsair', 25, '{"Capacidad": "16GB (2 x 8GB)", "Tipo": "DDR4", "Frecuencia": "3200 MHz", "Latencia": "CL16", "Voltaje": "1.35V", "RGB": "Sí, direccionable"}'),
+(5, 'RAM Corsair Vengeance RGB 16GB DDR4', 185000, 'https://images.unsplash.com/photo-1562976540-1502c2145186?q=80&w=600', 'Componentes', 'Kit de memoria RAM de alto rendimiento con iluminación dinámica RGB multizona y diseño térmico de aluminio.', 'Corsair Vengeance RGB PRO Series DDR4 ilumina tu PC con una luz espectacular multizona direccionable individualmente, a la vez que ofrece el mejor rendimiento y estabilidad en overclocking de memorias DDR4.', 'Corsair', 25, '{"Capacidad": "16GB (2 x 8GB)", "Tipo": "DDR4", "Frecuencia": "3200 MHz", "Latencia": "CL16", "Voltaje": "1.35V", "RGB": "Sí, direccionable"}'),
 
-(6, 'SSD M.2 NVMe Samsung 970 EVO 1TB', 380000, 'https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?q=80&w=600', 'Componentes', 'Unidad de estado sólido ultrarrápida con velocidades de lectura de hasta 3500 MB/s para cargas de nivel instantáneo.', 'Lleva tu experiencia de carga a límites insospechados. El Samsung 970 EVO ofrece velocidades excepcionales y una fiabilidad legendaria gracias a su controladora de última generación y a la tecnología inteligente TurboWrite.', 'Samsung', 14, '{"Capacidad": "1TB", "Formato": "M.2 2280", "Interfaz": "PCIe Gen 3.0 x4", "Lectura": "Hasta 3,500 MB/s", "Escritura": "Hasta 3,300 MB/s"}'),
+(6, 'SSD M.2 NVMe Samsung 970 EVO 1TB', 380000, 'https://images.unsplash.com/photo-1628557044797-f21a177c37ec?q=80&w=600', 'Componentes', 'Unidad de estado sólido ultrarrápida con velocidades de lectura de hasta 3500 MB/s para cargas de nivel instantáneo.', 'Lleva tu experiencia de carga a límites insospechados. El Samsung 970 EVO ofrece velocidades excepcionales y una fiabilidad legendaria gracias a su controladora de última generación y a la tecnología inteligente TurboWrite.', 'Samsung', 14, '{"Capacidad": "1TB", "Formato": "M.2 2280", "Interfaz": "PCIe Gen 3.0 x4", "Lectura": "Hasta 3,500 MB/s", "Escritura": "Hasta 3,300 MB/s"}'),
 
 (7, 'Fuente EVGA 600W W1 80+ White', 295000, 'https://images.unsplash.com/photo-1587202372775-e229f172b9d7?q=80&w=600', 'Componentes', 'Fuente de alimentación confiable con certificación 80 Plus para garantizar un flujo estable de energía.', 'La fuente EVGA 600W W1 es la elección ideal con el presupuesto justo. Con su ventilador súper silencioso, protecciones integradas de nivel industrial y cableado mallado negro, alimenta de forma segura tu PC gaming.', 'EVGA', 10, '{"Potencia": "600W", "Certificación": "80 Plus White", "Formato": "ATX", "Modular": "No", "Ventilador": "120mm silencioso"}'),
 
-(8, 'Gabinete Gaming NZXT H510 Flow Black', 420000, 'https://images.unsplash.com/photo-1624705002806-5d72df19c3ad?q=80&w=600', 'Componentes', 'Gabinete compacto de flujo de aire optimizado, ventana de vidrio templado y canal de cables premium.', 'El gabinete NZXT H510 Flow cuenta con un panel frontal de malla de alta ventilación para mantener tus componentes premium frescos. Incluye un sistema de gestión de cables patentado y barra de gestión icónica.', 'NZXT', 7, '{"Factor de forma": "Mid-Tower", "Soporte Motherboard": "ATX, Micro-ATX, Mini-ITX", "Materiales": "Acero y Vidrio Templado", "Ventiladores incluidos": "2x 120mm", "Filtros de polvo": "Todos los ingresos de aire"}'),
+(8, 'Gabinete Gaming NZXT H510 Flow Black', 420000, 'https://images.unsplash.com/photo-1585790050230-5dd28404ccb9?q=80&w=600', 'Componentes', 'Gabinete compacto de flujo de aire optimizado, ventana de vidrio templado y canal de cables premium.', 'El gabinete NZXT H510 Flow cuenta con un panel frontal de malla de alta ventilación para mantener tus componentes premium frescos. Incluye un sistema de gestión de cables patentado y barra de gestión icónica.', 'NZXT', 7, '{"Factor de forma": "Mid-Tower", "Soporte Motherboard": "ATX, Micro-ATX, Mini-ITX", "Materiales": "Acero y Vidrio Templado", "Ventiladores incluidos": "2x 120mm", "Filtros de polvo": "Todos los ingresos de aire"}'),
 
-(9, 'Cooler CPU Noctua NH-D15 chromax.black', 350000, 'https://images.unsplash.com/photo-1563770660941-20978e870e26?q=80&w=600', 'Componentes', 'Disipador de CPU de doble torre galardonado para overclocking extremo y funcionamiento ultra silencioso.', 'El NH-D15 chromax.black es una versión totalmente negra del galardonado disipador de CPU silencioso Noctua NH-D15, el buque insignia de la refrigeración por aire capaz de competir y superar a muchos sistemas de refrigeración líquida.', 'Noctua', 4, '{"Tipo": "Disipador de Aire de Doble Torre", "Ventiladores": "2x NF-A15 PWM 140mm", "Nivel de Ruido": "24.6 dB(A) máx", "Altura": "165 mm", "Compatibilidad": "Intel LGA1700/1200/115x y AMD AM5/AM4"}'),
+(9, 'Cooler CPU Noctua NH-D15 chromax.black', 350000, 'https://images.unsplash.com/photo-1624705002806-5d72df19c3ad?q=80&w=600', 'Componentes', 'Disipador de CPU de doble torre galardonado para overclocking extremo y funcionamiento ultra silencioso.', 'El NH-D15 chromax.black es una versión totalmente negra del galardonado disipador de CPU silencioso Noctua NH-D15, el buque insignia de la refrigeración por aire capaz de competir y superar a muchos sistemas de refrigeración líquida.', 'Noctua', 4, '{"Tipo": "Disipador de Aire de Doble Torre", "Ventiladores": "2x NF-A15 PWM 140mm", "Nivel de Ruido": "24.6 dB(A) máx", "Altura": "165 mm", "Compatibilidad": "Intel LGA1700/1200/115x y AMD AM5/AM4"}'),
 
-(10, 'Teclado Mecánico HyperX Alloy Origins Core', 280000, 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?q=80&w=600', 'Periféricos', 'Teclado mecánico ultra-compacto TKL con interruptores mecánicos HyperX y cuerpo de aluminio aeronáutico.', 'El HyperX Alloy Origins Core es un teclado resistente de formato TKL que cuenta con interruptores mecánicos personalizados HyperX, diseñados para ofrecer a los gamers la mejor mezcla de estilo, rendimiento y fiabilidad.', 'HyperX', 9, '{"Formato": "TKL (80%)", "Switch": "HyperX Red (Lineales)", "Iluminación": "RGB por tecla", "Cable": "USB-C desmontable", "Anti-ghosting": "100% integrado"}'),
+(10, 'Teclado Mecánico HyperX Alloy Origins Core', 280000, 'https://images.unsplash.com/photo-1595225476474-87563907a212?q=80&w=600', 'Periféricos', 'Teclado mecánico ultra-compacto TKL con interruptores mecánicos HyperX y cuerpo de aluminio aeronáutico.', 'El HyperX Alloy Origins Core es un teclado resistente de formato TKL que cuenta con interruptores mecánicos personalizados HyperX, diseñados para ofrecer a los gamers la mejor mezcla de estilo, rendimiento y fiabilidad.', 'HyperX', 9, '{"Formato": "TKL (80%)", "Switch": "HyperX Red (Lineales)", "Iluminación": "RGB por tecla", "Cable": "USB-C desmontable", "Anti-ghosting": "100% integrado"}'),
 
 (11, 'Monitor LG UltraGear 27" 144Hz IPS', 1100000, 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?q=80&w=600', 'Periféricos', 'Monitor gamer de 27 pulgadas con panel IPS de colores vibrantes, frecuencia de refresco de 144Hz y tiempo de respuesta de 1ms GtG.', 'Con una alta tasa de refresco y un panel IPS ultrarrápido, el LG UltraGear te permite reaccionar antes que tus rivales. Su excelente representación de color lo hace perfecto tanto para gaming como para diseño profesional.', 'LG', 6, '{"Tamaño de pantalla": "27 pulgadas", "Resolución": "FHD (1920x1080)", "Tipo de Panel": "IPS", "Tasa de refresco": "144 Hz", "Tiempo de respuesta": "1ms (GtG)", "Tecnología": "G-Sync Compatible, AMD FreeSync Premium"}'),
 
-(12, 'Mouse Gamer Logitech G502 HERO', 195000, 'https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?q=80&w=600', 'Periféricos', 'Mouse con sensor óptico HERO 25K de alta precisión, pesas ajustables y 11 botones completamente programables.', 'El mouse de alto rendimiento para gaming más vendido del mundo. Cuenta con el sensor óptico de última generación HERO para una máxima precisión de seguimiento, pesas modulares de calibración y sistema de botones mecánicos.', 'Logitech', 15, '{"Sensor": "HERO 25K", "Resolución DPI": "100 - 25,600 DPI", "Botones": "11 programables", "Sistema de Pesas": "5 pesas de 3.6g incluidas", "RGB": "Lightsync RGB"}');
+(12, 'Mouse Gamer Logitech G502 HERO', 195000, 'https://images.unsplash.com/photo-1527814050087-37938154799f?q=80&w=600', 'Periféricos', 'Mouse con sensor óptico HERO 25K de alta precisión, pesas ajustables y 11 botones completamente programables.', 'El mouse de alto rendimiento para gaming más vendido del mundo. Cuenta con el sensor óptico de última generación HERO para una máxima precisión de seguimiento, pesas modulares de calibración y sistema de botones mecánicos.', 'Logitech', 15, '{"Sensor": "HERO 25K", "Resolución DPI": "100 - 25,600 DPI", "Botones": "11 programables", "Sistema de Pesas": "5 pesas de 3.6g incluidas", "RGB": "Lightsync RGB"}');
 
--- 7. Insertar fotos adicionales de ejemplo en la galería para los primeros productos para habilitar el slider de fotos adicionales
 INSERT INTO public.producto_imagenes (producto_id, url, orden) VALUES
--- Ryzen 7 5800X
-(1, 'https://images.unsplash.com/photo-1591488320449-011701bb6704?q=80&w=600', 0),
-(1, 'https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=600', 1),
-(1, 'https://images.unsplash.com/photo-1562976540-1502c2145186?q=80&w=600', 2),
--- RTX 4060
-(3, 'https://images.unsplash.com/photo-1614624532983-4ce03382d63d?q=80&w=600', 0),
+(1, 'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?q=80&w=600', 0),
+(1, 'https://images.unsplash.com/photo-1562976540-1502c2145186?q=80&w=600', 1),
+(1, 'https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=600', 2),
+(3, 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=600', 0),
 (3, 'https://images.unsplash.com/photo-1547082299-de196ea013d6?q=80&w=600', 1),
--- Corsair RAM
-(5, 'https://images.unsplash.com/photo-1541029071515-84cc54f84dc5?q=80&w=600', 0),
-(5, 'https://images.unsplash.com/photo-1591488320449-011701bb6704?q=80&w=600', 1),
--- NZXT Case
-(8, 'https://images.unsplash.com/photo-1624705002806-5d72df19c3ad?q=80&w=600', 0),
+(5, 'https://images.unsplash.com/photo-1562976540-1502c2145186?q=80&w=600', 0),
+(5, 'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?q=80&w=600', 1),
+(8, 'https://images.unsplash.com/photo-1585790050230-5dd28404ccb9?q=80&w=600', 0),
 (8, 'https://images.unsplash.com/photo-1587202372775-e229f172b9d7?q=80&w=600', 1),
--- LG Monitor
 (11, 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?q=80&w=600', 0),
 (11, 'https://images.unsplash.com/photo-1585776245991-cf89dd7fc73a?q=80&w=600', 1);
 
--- 8. Insertar algunas reseñas de muestra para que se visualicen de inmediato
 INSERT INTO public.resenas (producto_id, puntuacion, comentario, created_at) VALUES
 (1, 5, 'Una absoluta bestia. Las temperaturas están bien con un disipador decente, y el rendimiento en renderizado es asombroso.', timezone('utc'::text, now() - interval '2 days')),
 (1, 4, 'Excelente procesador, vuela en todos los juegos. Lo único malo es que calienta un poco bajo estrés prolongado.', timezone('utc'::text, now() - interval '5 days')),
-(3, 5, 'El DLSS 3 es magia pura. Puedo jugar Cyberpunk 2077 a más de 90fps con Ray Tracing en Ultra. Super recomendado.', timezone('utc'::text, now() - interval '1 day')),
+(2, 5, 'Rendimiento espectacular por el precio. Excelente para gaming a 1080p y 1440p sin cuellos de botella.', timezone('utc'::text, now() - interval '1 day')),
+(2, 5, 'Muy fresco y potente. La mejor opción calidad/precio del mercado actualmente.', timezone('utc'::text, now() - interval '3 days')),
+(3, 5, 'El DLSS 3 es magia pura. Puedo jugar Cyberpunk 2077 a más de 90fps con Ray Tracing en Ultra. Super recomendado.', timezone('utc'::text, now() - interval '4 days')),
+(3, 4, 'Excelente gráfica, muy silenciosa y consume súper poco. Ideal para actualizar desde una serie 2000.', timezone('utc'::text, now() - interval '6 days')),
+(4, 5, 'Placa base súper robusta, los VRM no pasan de 50 grados. Bios muy intuitiva.', timezone('utc'::text, now() - interval '2 days')),
+(4, 4, 'Buena placa, cumple con todo lo necesario y el WiFi integrado funciona muy bien.', timezone('utc'::text, now() - interval '7 days')),
 (5, 5, 'Memorias hermosas, el RGB se sincroniza perfecto con iCUE. Muy estables a 3200MHz con perfil XMP.', timezone('utc'::text, now() - interval '8 days')),
-(11, 4, 'El panel IPS se ve fenomenal, colores súper vivos. La tasa de 144Hz es sumamente suave. Llego sin píxeles muertos.', timezone('utc'::text, now() - interval '12 days'));
+(5, 5, 'Las instalé y funcionaron a la perfección a la primera. El diseño es muy elegante.', timezone('utc'::text, now() - interval '10 days')),
+(6, 5, 'Las cargas de Windows y juegos ahora son instantáneas. La velocidad de transferencia es brutal.', timezone('utc'::text, now() - interval '1 day')),
+(6, 5, 'El mejor SSD PCIe 3.0 que he tenido. Gran confiabilidad de Samsung.', timezone('utc'::text, now() - interval '12 days')),
+(7, 4, 'Fuente muy silenciosa, los cables mallados ayudan bastante a mantener el gabinete ordenado.', timezone('utc'::text, now() - interval '3 days')),
+(7, 5, 'EVGA nunca decepciona. Da la potencia justa y no hace nada de ruido incluso bajo carga.', timezone('utc'::text, now() - interval '15 days')),
+(8, 5, 'El flujo de aire es excelente. Bajaron las temperaturas de mi gráfica unos 10 grados.', timezone('utc'::text, now() - interval '4 days')),
+(8, 4, 'Es precioso y minimalista. Un poco justo el espacio para los cables atrás, pero nada imposible.', timezone('utc'::text, now() - interval '9 days')),
+(9, 5, 'Rinde igual que una refrigeración líquida cara, pero con 0 riesgo de fugas y súper silencioso.', timezone('utc'::text, now() - interval '2 days')),
+(9, 5, 'Gigante pero efectivo. Mantiene mi procesador congelado.', timezone('utc'::text, now() - interval '6 days')),
+(10, 5, 'El chasis de aluminio le da un toque muy premium. Los switches rojos son súper suaves para escribir y jugar.', timezone('utc'::text, now() - interval '1 day')),
+(10, 4, 'Excelente teclado TKL. El software podría mejorar un poco, pero el teclado en sí es un 10/10.', timezone('utc'::text, now() - interval '5 days')),
+(11, 5, 'El panel IPS se ve fenomenal, colores súper vivos. La tasa de 144Hz es sumamente suave. Llego sin píxeles muertos.', timezone('utc'::text, now() - interval '2 days')),
+(11, 5, 'Cambio radical pasar de 60hz a 144hz. Los colores que da este LG son inigualables.', timezone('utc'::text, now() - interval '11 days')),
+(12, 5, 'El mejor mouse que he probado. La rueda infinita es una maravilla y los botones extra son muy útiles.', timezone('utc'::text, now() - interval '1 day')),
+(12, 4, 'Muy buen sensor y agarre. Un poco pesado para algunos, pero con las pesas se ajusta.', timezone('utc'::text, now() - interval '4 days'));

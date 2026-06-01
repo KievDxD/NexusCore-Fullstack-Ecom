@@ -264,7 +264,7 @@ export default function PaginaProducto() {
           
           {/* Foto Principal */}
           <div 
-            className="relative group aspect-[4/3] rounded-2xl overflow-hidden border border-themeBorder bg-themeInput/20 flex items-center justify-center shadow-lg cursor-zoom-in"
+            className="relative group aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center shadow-[0_8px_32px_0_rgba(0,0,0,0.25)] backdrop-blur-xl cursor-zoom-in transition-all duration-500 hover:border-white/20 hover:shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => {
               setIsHovered(false);
@@ -280,7 +280,7 @@ export default function PaginaProducto() {
                 transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
                 transform: isHovered ? 'scale(2.2)' : 'scale(1)'
               }}
-              className="w-full h-full object-cover transition-transform duration-200 ease-out"
+              className="w-full h-full object-contain p-4 transition-transform duration-300 ease-out drop-shadow-2xl"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
               }}
@@ -538,21 +538,28 @@ export default function PaginaProducto() {
                 <p className="text-[11px] text-themeTextMuted/70 mt-1">Sé el primero en valorar este hardware.</p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin">
-                {resenas.map((res) => (
-                  <div 
-                    key={res.id} 
-                    className="p-5 bg-themeCard border border-themeBorder/70 rounded-2xl space-y-3 shadow-sm transition-all hover:border-themeBorder"
-                  >
+              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                {resenas.map((res) => {
+                  const FAKE_USERNAMES = ["nexus_builder", "kiev_gamer", "tech_ninja", "rgb_lover", "fps_hunter", "pc_master", "hardware_guru", "cyber_punk", "pixel_perfect", "silicon_fan"];
+                  const displayUsername = res.profiles?.username || `${FAKE_USERNAMES[res.id % FAKE_USERNAMES.length]}_${(res.id % 89) + 10}`;
+                  
+                  return (
+                    <div 
+                      key={res.id} 
+                      className="p-5 bg-themeCard border border-themeBorder/70 rounded-2xl space-y-3 shadow-sm transition-all hover:border-themeBorder"
+                    >
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5">
                         <img 
-                          src={res.profiles?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`} 
+                          src={res.profiles?.avatar_url && res.profiles.avatar_url !== 'null' ? res.profiles.avatar_url : `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`} 
                           alt="Avatar" 
                           className="w-8 h-8 rounded-lg bg-themeInput p-0.5 border border-themeBorder/40"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`;
+                          }}
                         />
                         <div>
-                          <p className="text-xs font-black text-themeText">@{res.profiles?.username || "usuario"}</p>
+                          <p className="text-xs font-black text-themeText">@{displayUsername}</p>
                           <div className="flex text-amber-500 mt-0.5">
                             {[1, 2, 3, 4, 5].map((s) => (
                               <Star 
@@ -574,7 +581,8 @@ export default function PaginaProducto() {
                       "{res.comentario}"
                     </p>
                   </div>
-                ))}
+                );
+              })}
               </div>
             )}
           </div>
@@ -632,12 +640,11 @@ export default function PaginaProducto() {
 
             {/* Contenedor de la Imagen con Zoom — overflow hidden estricto */}
             <div 
-              className="relative w-full h-full max-w-4xl flex items-center justify-center overflow-hidden rounded-2xl"
+              className="relative w-full max-w-4xl flex items-center justify-center overflow-hidden rounded-2xl h-[70vh] min-h-[300px]"
               onClick={(e) => e.stopPropagation()}
-              style={{ maxHeight: '75vh' }}
             >
               <img 
-                src={imagenActiva} 
+                src={imagenActiva.replace('&w=600', '&w=1600')} 
                 alt={producto.nombre} 
                 draggable={false}
                 onClick={() => {
@@ -651,10 +658,10 @@ export default function PaginaProducto() {
                 style={{
                   transformOrigin: modalZoomed ? `${modalZoomPos.x}% ${modalZoomPos.y}%` : 'center',
                 }}
-                className={`w-full h-full object-contain select-none transition-transform duration-300 ease-out ${
+                className={`max-w-full max-h-full object-contain select-none transition-transform duration-300 ease-out ${
                   modalZoomed 
                     ? 'scale-[2.5] cursor-grab active:cursor-grabbing' 
-                    : 'scale-100 cursor-zoom-in hover:scale-[1.02]'
+                    : 'scale-100 cursor-zoom-in hover:scale-[1.02] drop-shadow-2xl'
                 }`}
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
@@ -663,7 +670,7 @@ export default function PaginaProducto() {
               {/* Indicador de zoom activo */}
               {modalZoomed && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md text-white/70 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full pointer-events-none border border-white/10">
-                  Zoom 2.5× · Mover ratón para explorar
+                  Zoom 1.5× · Mover ratón para explorar
                 </div>
               )}
             </div>
