@@ -7,25 +7,41 @@ import { LISTA_PRODUCTOS } from '../data/productos';
 interface ProductosState {
   productos: Producto[];
   cargando: boolean;
+  yaIntento: boolean;
   fetchProductos: () => Promise<void>;
 }
 
-export const useProductosStore = create<ProductosState>((set) => ({
+export const useProductosStore = create<ProductosState>((set, get) => ({
   productos: [],
   cargando: true,
+  yaIntento: false,
   fetchProductos: async () => {
-    set({ cargando: true });
+    if (get().yaIntento) return;
+    set({ cargando: true, yaIntento: true });
+
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+
     try {
-      const { data, error } = await supabase
+      const fetchPromise = supabase
         .from('productos')
         .select('*')
         .order('id', { ascending: true });
-      
+
+      const result = await Promise.race([fetchPromise, timeout]);
+
+      if (!result || 'error' in result === false) {
+        console.warn("Timeout de conexion con Supabase, usando catalogo local");
+        set({ productos: LISTA_PRODUCTOS, cargando: false });
+        return;
+      }
+
+      const { data, error } = result as { data: Producto[] | null; error: unknown };
+
       if (error || !data || data.length === 0) {
-        console.warn("Usando catálogo local (fallback) debido a error o base de datos vacía");
+        console.warn("Usando catalogo local (fallback) debido a error o base de datos vacia");
         set({ productos: LISTA_PRODUCTOS });
       } else {
-        set({ productos: data || [] });
+        set({ productos: data });
       }
     } catch (err) {
       console.error("Error inesperado en fetch de productos, usando fallback:", err);
@@ -40,7 +56,7 @@ export function useProductos() {
   const { productos, cargando, fetchProductos } = useProductosStore();
 
   useEffect(() => {
-    if (productos.length === 0) {
+    if (productos.length === 0 && !useProductosStore.getState().yaIntento) {
       fetchProductos();
     }
   }, [productos.length, fetchProductos]);
@@ -133,7 +149,13 @@ export function useProductos() {
         }));
       }
     } else {
-      finalResenas = resenas || [];
+      finalResenas = (resenas || []).map((r: { id: number; puntuacion: number; comentario: string; created_at: string; profiles: unknown }) => ({
+        id: r.id,
+        puntuacion: r.puntuacion,
+        comentario: r.comentario,
+        created_at: r.created_at,
+        profiles: Array.isArray(r.profiles) ? (r.profiles[0] || null) : (r.profiles || null)
+      }));
     }
 
     return {

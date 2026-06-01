@@ -93,14 +93,21 @@ export default function PaginaProducto() {
     async function cargarDetalles() {
       if (!id) return;
       setCargando(true);
-      const res = await fetchProductoById(Number(id));
-      if (res) {
-        setProducto(res.producto);
-        setResenas(res.resenas);
-        // Colocar la primera imagen como activa
-        setImagenActiva(res.producto.imagen);
-      } else {
-        toast.error("Producto no encontrado");
+
+      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+
+      try {
+        const res = await Promise.race([fetchProductoById(Number(id)), timeout]);
+        if (res && res.producto) {
+          setProducto(res.producto);
+          setResenas(res.resenas);
+          setImagenActiva(res.producto.imagen);
+        } else {
+          toast.error("Producto no encontrado o tiempo de espera agotado");
+          navigate('/');
+        }
+      } catch {
+        toast.error("Error al cargar el producto");
         navigate('/');
       }
       setCargando(false);
@@ -593,7 +600,7 @@ export default function PaginaProducto() {
       {/* 🖼️ INTERACTIVE LIGHTBOX / GALLERY MODAL (PUNTO 1) */}
       {zoomAbierto && (
         <div 
-          className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-between p-4 animate-fade-in"
+          className="fixed inset-0 z-[1000] bg-black/40 backdrop-blur-2xl flex flex-col items-center justify-between p-4 animate-fade-in"
           onClick={() => {
             setZoomAbierto(false);
             setModalZoomed(false);
@@ -639,8 +646,8 @@ export default function PaginaProducto() {
             )}
 
             {/* Contenedor de la Imagen con Zoom — overflow hidden estricto */}
-            <div 
-              className="relative w-full max-w-4xl flex items-center justify-center overflow-hidden rounded-2xl h-[70vh] min-h-[300px]"
+            <div
+              className="relative w-full h-full flex items-center justify-center overflow-hidden rounded-2xl min-h-[300px]"
               onClick={(e) => e.stopPropagation()}
             >
               <img 
@@ -656,9 +663,9 @@ export default function PaginaProducto() {
                   if (modalZoomed) setModalZoomPos({ x: 50, y: 50 });
                 }}
                 style={{
-                  transformOrigin: modalZoomed ? `${modalZoomPos.x}% ${modalZoomPos.y}%` : 'center',
+                  transformOrigin: modalZoomed ? `${modalZoomPos.x}% ${modalZoomPos.y}%` : 'center center',
                 }}
-                className={`max-w-full max-h-full object-contain select-none transition-transform duration-300 ease-out ${
+                className={`w-full h-full object-contain select-none transition-transform duration-300 ease-out ${
                   modalZoomed 
                     ? 'scale-[2.5] cursor-grab active:cursor-grabbing' 
                     : 'scale-100 cursor-zoom-in hover:scale-[1.02] drop-shadow-2xl'
@@ -707,7 +714,7 @@ export default function PaginaProducto() {
                       : 'border-white/10 hover:border-white/40 opacity-60 hover:opacity-100'
                   }`}
                 >
-                  <img src={url} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" />
+                  <img src={url.replace('&w=1600', '&w=600')} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" loading="lazy" />
                 </button>
               ))}
             </div>

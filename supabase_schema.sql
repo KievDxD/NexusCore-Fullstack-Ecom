@@ -107,8 +107,6 @@ insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
 
-alter table storage.objects enable row level security;
-
 drop policy if exists "Cualquier persona puede ver avatars" on storage.objects;
 drop policy if exists "Los usuarios pueden subir sus propios avatares" on storage.objects;
 drop policy if exists "Los usuarios pueden actualizar sus propios avatares" on storage.objects;
@@ -155,6 +153,9 @@ create table public.productos (
 
 alter table public.productos enable row level security;
 
+drop policy if exists "Cualquier persona puede ver productos" on public.productos;
+drop policy if exists "Solo administradores pueden modificar productos" on public.productos;
+
 create policy "Cualquier persona puede ver productos" on public.productos
   for select using (true);
 
@@ -174,6 +175,9 @@ create table if not exists public.producto_imagenes (
 );
 
 alter table public.producto_imagenes enable row level security;
+
+drop policy if exists "Cualquier persona puede ver imágenes adicionales" on public.producto_imagenes;
+drop policy if exists "Solo administradores pueden modificar imágenes adicionales" on public.producto_imagenes;
 
 create policy "Cualquier persona puede ver imágenes adicionales" on public.producto_imagenes
   for select using (true);

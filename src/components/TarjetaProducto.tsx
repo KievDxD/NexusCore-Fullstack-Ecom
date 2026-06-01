@@ -78,6 +78,7 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
           <img 
             src={producto.imagen} 
             alt={producto.nombre} 
+            loading="lazy"
             className="product-card__image group-hover:scale-105 transition-transform duration-500"
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
