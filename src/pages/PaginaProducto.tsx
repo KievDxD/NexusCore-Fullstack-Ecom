@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProductos } from '../hooks/useProductos';
 import { useCarrito, type Producto } from '../hooks/useCarrito';
@@ -598,7 +599,7 @@ export default function PaginaProducto() {
       </div>
 
       {/* 🖼️ INTERACTIVE LIGHTBOX / GALLERY MODAL (PUNTO 1) */}
-      {zoomAbierto && (
+      {zoomAbierto && createPortal(
         <div 
           className="fixed inset-0 z-[1000] bg-black/40 backdrop-blur-2xl flex flex-col items-center justify-between p-4 animate-fade-in"
           onClick={() => {
@@ -719,7 +720,8 @@ export default function PaginaProducto() {
               ))}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>
