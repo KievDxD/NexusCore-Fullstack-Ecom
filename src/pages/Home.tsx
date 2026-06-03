@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import AdminProductoModal from '../components/AdminProductoModal';
 
 export default function Home() {
   const [busqueda, setBusqueda] = useState('');
@@ -9,16 +11,27 @@ export default function Home() {
   
   // 🆕 Usamos nuestro hook premium con soporte de fallback local y control de stock
   const { productos: productosDB, cargando } = useProductos();
+  const { isAdmin } = useAuth();
+  const [modalAddOpen, setModalAddOpen] = useState(false);
 
-  // Ahora el filtro usa productosDB en lugar de la lista falsa
-  const productosFiltrados = productosDB.filter((producto) => {
-    const coincideBusqueda = producto.nombre.toLowerCase().includes(busqueda.toLowerCase());
-    const coincideCategoria = categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
-    return coincideBusqueda && coincideCategoria;
-  });
+  // Ahora el filtro usa productosDB en lugar de la lista falsa y ordena por stock
+  const productosFiltrados = productosDB
+    .filter((producto) => {
+      const coincideBusqueda = producto.nombre.toLowerCase().includes(busqueda.toLowerCase());
+      const coincideCategoria = categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
+      return coincideBusqueda && coincideCategoria;
+    })
+    .sort((a, b) => {
+      // Los productos sin stock se van al final
+      const stockA = a.stock ?? 10;
+      const stockB = b.stock ?? 10;
+      if (stockA === 0 && stockB > 0) return 1;
+      if (stockB === 0 && stockA > 0) return -1;
+      return 0; // Si ambos tienen o no tienen stock, mantienen su orden natural
+    });
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div id="catalogo" className="space-y-8 animate-fade-in">
       
       {/* 🛠️ BARRA DE FILTROS Y BUSCADOR */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-themeCard p-4 rounded-xl shadow-sm border border-themeBorder text-themeText transition-all duration-500">
@@ -57,6 +70,15 @@ export default function Home() {
               {cat}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              onClick={() => setModalAddOpen(true)}
+              className="px-4 py-2 text-xs md:text-sm font-black rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/15 flex items-center gap-1.5 shrink-0 transition-all active:scale-95 cursor-pointer ml-2"
+            >
+              <Plus size={14} />
+              Agregar Hardware
+            </button>
+          )}
         </div>
       </div>
 
@@ -88,6 +110,13 @@ export default function Home() {
           </div>
         )
       )}
+
+      {/* Modal para agregar productos */}
+      <AdminProductoModal 
+        isOpen={modalAddOpen} 
+        onClose={() => setModalAddOpen(false)} 
+        productoAEditar={null} 
+      />
     </div>
   );
 }

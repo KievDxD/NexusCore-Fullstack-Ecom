@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Mail, Lock, User as UserIcon, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Definimos los 3 estados posibles de nuestra pantalla
@@ -19,6 +19,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [verPassword, setVerPassword] = useState(false);
   const [verConfirmarPassword, setVerConfirmarPassword] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { login, registro } = useAuth();
   const navigate = useNavigate();
@@ -79,15 +81,28 @@ export default function Login() {
         }
         
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(identificador, {
-          redirectTo: `${window.location.origin}/ajustes`,
+          redirectTo: `${window.location.origin}/reset-password`,
         });
         if (resetError) throw resetError;
+
+        // Iniciar cooldown de 60 segundos para evitar rate limit
+        setCooldown(60);
+        if (cooldownRef.current) clearInterval(cooldownRef.current);
+        cooldownRef.current = setInterval(() => {
+          setCooldown((prev) => {
+            if (prev <= 1) {
+              if (cooldownRef.current) clearInterval(cooldownRef.current);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
 
         toast.success('Instrucciones enviadas', {
           description: 'Revisa tu correo para restablecer tu contraseña.',
           duration: 3000,
         });
-        setMensajeExito('Te hemos enviado un correo con las instrucciones para cambiar tu contraseña.');
+        setMensajeExito('Te hemos enviado un correo con las instrucciones para cambiar tu contraseña. Revisa tu bandeja de entrada y spam.');
         setModo('login');
       }
     } catch (err) {
@@ -100,6 +115,8 @@ export default function Login() {
         errorMsg = 'Tu correo aún no ha sido confirmado. Revisa tu bandeja de entrada.';
       } else if (errorMsg.includes('User already registered')) {
         errorMsg = 'Este correo electrónico ya está registrado. ¿Quieres iniciar sesión?';
+      } else if (errorMsg.toLowerCase().includes('rate limit') || errorMsg.toLowerCase().includes('too many requests')) {
+        errorMsg = 'Has enviado demasiadas solicitudes. Espera un momento antes de intentar de nuevo.';
       }
       
       setError(errorMsg);
@@ -314,12 +331,18 @@ export default function Login() {
           {/* Botón Principal Dinámico */}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (modo === 'recuperar' && cooldown > 0)}
             className="w-full bg-themeAccent hover:bg-themeAccentHover text-white font-black py-3.5 px-4 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-themeAccent/15 text-xs uppercase tracking-widest mt-2 hover:shadow-themeAccent/35 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : (
               modo === 'login' ? 'Iniciar Sesión' :
-              modo === 'registro' ? 'Crear e Iniciar' : 'Enviar instrucciones'
+              modo === 'registro' ? 'Crear e Iniciar' : 
+              cooldown > 0 ? (
+                <span className="flex items-center gap-2">
+                  <Timer size={14} />
+                  Reenviar en {cooldown}s
+                </span>
+              ) : 'Enviar instrucciones'
             )}
           </button>
         </form>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Rounded rectangle background in dark zinc/charcoal (YouTube/Spotify style dark) -->
+  <rect width="64" height="64" rx="18" fill="#18181b"/>
+  <!-- Minimalist N in clean white -->
+  <path d="M19 44V20H24.5L34.5 39.5V20H39V44H33.5L23.5 24.5V44H19Z" fill="#ffffff"/>
+  <!-- Elegant double slash in soft gray/accent -->
+  <path d="M43 38L46 26M47 38L50 26" stroke="#e4e4e7" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -53,34 +53,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    // Escuchar cambios de autenticación (se dispara con INITIAL_SESSION inmediatamente en v2)
+    // Escuchar cambios de autenticación y cargar sesión inicial de manera segura
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("onAuthStateChange event:", event);
-      const currentUser = session?.user ?? null;
-      
+      console.log(`onAuthStateChange event: ${event}`, session);
       if (!active) return;
-      
-      setUser(currentUser);
+
+      const currentUser = session?.user ?? null;
+
       if (currentUser) {
-        await fetchProfile(currentUser.id, currentUser.email);
+        // Carga optimista: Asumir que la sesión local es válida para renderizar inmediatamente la UI
+        setUser(currentUser);
+        if (active) setCargando(false);
+
+        // Verificar la sesión real contra el servidor en segundo plano
+        const { data: { user: verifiedUser }, error } = await supabase.auth.getUser();
+        
+        if (error || !verifiedUser) {
+          console.warn("Sesión inválida o usuario eliminado del servidor. Limpiando sesión local:", error?.message);
+          try {
+            await supabase.auth.signOut({ scope: 'local' });
+          } catch (e) {
+            console.warn("Fallo al ejecutar signOut local:", e);
+          }
+          setUser(null);
+          setRole(null);
+          setUsername(null);
+          setAvatarUrl(null);
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
+              localStorage.removeItem(key);
+            }
+          }
+          return;
+        }
+
+        // Si es válido, actualizar el usuario y cargar su perfil público en background
+        setUser(verifiedUser);
+        await fetchProfile(verifiedUser.id, verifiedUser.email);
       } else {
+        // Si no hay sesión, limpiar estados
+        setUser(null);
         setRole(null);
         setUsername(null);
         setAvatarUrl(null);
-      }
-      
-      if (active) {
-        setCargando(false);
+        if (active) setCargando(false);
       }
     });
 
-    // Salvaguarda para evitar cargas infinitas si la base de datos tarda en responder o no hay conexión
+    // Salvaguarda para evitar pantallas de carga infinitas
     const timeoutId = setTimeout(() => {
       if (active && cargando) {
-        console.warn("Tiempo de espera de inicialización agotado. Forzando cargando a false.");
+        console.warn("Tiempo de espera de inicialización agotado. Desactivando cargando.");
         setCargando(false);
       }
-    }, 2500);
+    }, 4500);
 
     return () => {
       active = false;
@@ -193,41 +220,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(`El nombre de usuario "@${cleanUsername}" ya está en uso. Por favor, elige otro.`);
       }
 
-      // 2. Comprobar si ya existe el perfil de este usuario
-      const { data: perfilPropio } = await supabase
+      // 2. Hacer upsert del perfil completo
+      const { error } = await supabase
         .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle();
+        .upsert({
+          id: user.id,
+          username: cleanUsername,
+          email: user.email,
+          role: role || 'usuario',
+          avatar_url: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`
+        });
 
-      if (perfilPropio) {
-        // Hacer UPDATE
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({ username: cleanUsername })
-          .eq('id', user.id);
-
-        if (updateError) throw updateError;
-      } else {
-        // Hacer INSERT
-        const { error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user.id,
-            username: cleanUsername,
-            role: role || 'usuario',
-            avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`
-          });
-
-        if (insertError) throw insertError;
-      }
+      if (error) throw error;
 
       // 3. Sincronizar estado local inmediatamente
       setUsername(cleanUsername);
     } catch (err) {
       console.error("Error al actualizar username:", err);
-      const error = err instanceof Error ? err : new Error(String(err));
-      throw new Error(error.message || 'Error inesperado al actualizar el username. Intenta de nuevo.', { cause: err });
+      const errorMsg = err instanceof Error ? err.message : (err as any)?.message || String(err);
+      throw new Error(errorMsg);
     }
   };
 
@@ -235,17 +246,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error('No hay sesión activa.');
 
     try {
+      // Usar upsert para garantizar creación de perfil si no existe
       const { error } = await supabase
         .from('profiles')
-        .update({ avatar_url: nuevoAvatarUrl })
-        .eq('id', user.id);
+        .upsert({
+          id: user.id,
+          username: username || user.email?.split('@')[0] || 'usuario',
+          email: user.email,
+          role: role || 'usuario',
+          avatar_url: nuevoAvatarUrl
+        });
 
       if (error) throw error;
       setAvatarUrl(nuevoAvatarUrl);
     } catch (err) {
       console.error("Error al actualizar avatar:", err);
-      const error = err instanceof Error ? err : new Error(String(err));
-      throw new Error(error.message || 'Error inesperado al actualizar el avatar.', { cause: err });
+      const errorMsg = err instanceof Error ? err.message : (err as any)?.message || String(err);
+      throw new Error(errorMsg);
     }
   };
 
@@ -285,11 +302,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setRole(null);
-    setUsername(null);
-    setAvatarUrl(null);
+    try {
+      // Intentar signOut estándar (notifica al servidor y borra local)
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.warn("Error devuelto por Supabase signOut:", error);
+        // Si falla el servidor, forzar cierre local
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+    } catch (err) {
+      console.warn("Excepción durante signOut:", err);
+      await supabase.auth.signOut({ scope: 'local' });
+    } finally {
+      // Siempre limpiar estados locales de React de forma síncrona
+      setUser(null);
+      setRole(null);
+      setUsername(null);
+      setAvatarUrl(null);
+
+      // Borrar manualmente todas las claves de localStorage de Supabase por si acaso
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+      } catch (e) {
+        console.warn("No se pudo limpiar localStorage manualmente:", e);
+      }
+
+      // Reinicio nuclear de la app para asegurar la limpieza del estado
+      window.location.href = '/login';
+    }
   };
 
   const isAdmin = role === 'admin';

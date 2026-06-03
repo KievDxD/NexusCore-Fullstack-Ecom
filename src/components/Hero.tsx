@@ -1,8 +1,9 @@
+import { memo } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useProductos } from '../hooks/useProductos';
 import { Sparkles, Terminal } from 'lucide-react';
 
-export default function Hero() {
+export default memo(function Hero() {
   const { whatsappNumber } = useSettings();
   const { productos } = useProductos();
 
@@ -52,7 +53,7 @@ export default function Hero() {
           {/* Botones de acción premium */}
           <div className="flex flex-wrap gap-4 pt-3">
             <button 
-              onClick={() => window.scrollTo({ top: 580, behavior: 'smooth' })}
+              onClick={() => document.getElementById('catalogo')?.scrollIntoView({ behavior: 'smooth' })}
               className="bg-themeAccent hover:bg-themeAccentHover text-white font-black text-xs uppercase tracking-widest px-8 py-4 rounded-xl transition-all shadow-lg shadow-themeAccent/15 active:scale-[0.97] hover:shadow-themeAccent/30"
             >
               Ver Catálogo
@@ -85,15 +86,22 @@ export default function Hero() {
               </div>
               
               <div className="h-[120px] rounded-2xl bg-gradient-to-tr from-themeAccent/10 to-themeAccent/5 border border-themeBorder/40 overflow-hidden flex items-center justify-center relative">
-                <div className="absolute w-20 h-20 bg-themeAccent/15 blur-2xl rounded-full animate-pulse"></div>
-                <Terminal size={36} className="text-themeAccent/40 animate-bounce duration-3000" />
+                {/* Logo del favicon dentro de la tarjeta */}
+                <img 
+                  src="/favicon.svg" 
+                  alt="NEXUS" 
+                  className="w-16 h-16 opacity-30 group-hover:opacity-60 transition-opacity duration-700"
+                  width={64}
+                  height={64}
+                  loading="lazy"
+                />
               </div>
 
               <div className="space-y-2">
                 <p className="text-xs font-black uppercase tracking-widest text-themeText">ESTADO DEL INVENTARIO</p>
                 <div className="flex items-center justify-between text-[11px] text-themeTextMuted">
                   <span>Productos Disponibles</span>
-                  <span className="font-bold text-themeText">{totalArticulos} ítems</span>
+                  <span className="font-bold text-themeText">{articulosEnStock} de {totalArticulos} ítems</span>
                 </div>
                 <div className="w-full bg-themeInput/50 rounded-full h-1.5 overflow-hidden">
                   <div className="bg-themeAccent h-1.5 rounded-full transition-all duration-1000" style={{ width: `${porcentajeStock}%` }}></div>
@@ -117,4 +125,4 @@ export default function Hero() {
       </div>
     </section>
   );
-}
+});

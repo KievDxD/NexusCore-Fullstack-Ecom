@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProductos } from '../hooks/useProductos';
@@ -7,8 +7,9 @@ import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency } from '../utils/currency';
-import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
+import AdminProductoModal from '../components/AdminProductoModal';
 
 interface ReviewItem {
   id: number;
@@ -27,11 +28,12 @@ export default function PaginaProducto() {
   const { fetchProductoById } = useProductos();
   const agregarProducto = useCarrito((state) => state.agregarProducto);
   const { currency, rates } = useSettings();
-  const { user, username, avatarUrl } = useAuth();
+  const { user, username, avatarUrl, isAdmin } = useAuth();
 
   const [producto, setProducto] = useState<Producto | null>(null);
   const [resenas, setResenas] = useState<ReviewItem[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [modalEditOpen, setModalEditOpen] = useState(false);
 
   // Estados de galería
   const [imagenActiva, setImagenActiva] = useState('');
@@ -61,8 +63,8 @@ export default function PaginaProducto() {
   const [modalZoomPos, setModalZoomPos] = useState({ x: 50, y: 50 });
 
   const imagenesArray = producto?.imagenes && producto.imagenes.length > 0
-    ? producto.imagenes.map(img => img.url)
-    : producto ? [producto.imagen] : [];
+    ? producto.imagenes.map(img => img.url).filter(Boolean)
+    : producto && producto.imagen ? [producto.imagen] : [];
 
   const currentIdx = imagenesArray.indexOf(imagenActiva) !== -1 ? imagenesArray.indexOf(imagenActiva) : 0;
 
@@ -90,29 +92,36 @@ export default function PaginaProducto() {
     setModalZoomPos({ x: 50, y: 50 });
   };
 
-  useEffect(() => {
-    async function cargarDetalles() {
-      if (!id) return;
-      setCargando(true);
+  const cargarDetalles = useCallback(async () => {
+    if (!id) return;
+    setCargando(true);
 
-      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
 
-      try {
-        const res = await Promise.race([fetchProductoById(Number(id)), timeout]);
-        if (res && res.producto) {
-          setProducto(res.producto);
-          setResenas(res.resenas);
-          setImagenActiva(res.producto.imagen);
-        } else {
-          toast.error("Producto no encontrado o tiempo de espera agotado");
-          navigate('/');
-        }
-      } catch {
-        toast.error("Error al cargar el producto");
+    try {
+      const res = await Promise.race([fetchProductoById(Number(id)), timeout]);
+      if (res && res.producto) {
+        setProducto(res.producto);
+        setResenas(res.resenas || []);
+        // Inicializar la imagen activa de forma segura
+        const validImgs = res.producto.imagenes && res.producto.imagenes.length > 0
+          ? res.producto.imagenes.map((img: any) => img.url).filter(Boolean)
+          : [];
+        const defaultImg = validImgs.length > 0 ? validImgs[0] : (res.producto.imagen || '');
+        setImagenActiva(defaultImg);
+      } else {
+        toast.error("Producto no encontrado o tiempo de espera agotado");
         navigate('/');
       }
-      setCargando(false);
+    } catch (err) {
+      console.error("Error al cargar detalles:", err);
+      toast.error("Error al cargar el producto");
+      navigate('/');
     }
+    setCargando(false);
+  }, [id, fetchProductoById, navigate]);
+
+  useEffect(() => {
     cargarDetalles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -155,8 +164,14 @@ export default function PaginaProducto() {
 
   if (!producto) return null;
 
-  const precioConvertido = convertPrice(producto.precio, currency, rates);
-  const precioFormateado = formatCurrency(precioConvertido, currency);
+  const tieneDescuento = (producto.descuento ?? 0) > 0;
+  const precioOriginal = convertPrice(producto.precio, currency, rates);
+  const precioFinal = tieneDescuento 
+    ? convertPrice(producto.precio * (1 - (producto.descuento ?? 0) / 100), currency, rates)
+    : precioOriginal;
+
+  const precioOriginalFormateado = formatCurrency(precioOriginal, currency);
+  const precioFinalFormateado = formatCurrency(precioFinal, currency);
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
@@ -334,9 +349,20 @@ export default function PaginaProducto() {
         {/* 📝 SECCIÓN DERECHA: INFORMACIÓN Y ACCIONES */}
         <div className="md:col-span-6 space-y-6">
           <div className="space-y-2">
-            <span className="inline-block px-3 py-1 bg-themeAccent/10 border border-themeAccent/20 text-themeAccent text-[9px] font-black uppercase tracking-widest rounded-full">
-              {producto.marca || 'NEXUS'}
-            </span>
+            <div className="flex items-center justify-between gap-4">
+              <span className="inline-block px-3 py-1 bg-themeAccent/10 border border-themeAccent/20 text-themeAccent text-[9px] font-black uppercase tracking-widest rounded-full">
+                {producto.marca || 'NEXUS'}
+              </span>
+              {isAdmin && (
+                <button
+                  onClick={() => setModalEditOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-themeAccent/10 border border-themeAccent/20 hover:bg-themeAccent hover:text-white text-themeAccent text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer"
+                >
+                  <Pencil size={11} />
+                  Editar Hardware
+                </button>
+              )}
+            </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">
               {producto.nombre}
             </h1>
@@ -355,9 +381,21 @@ export default function PaginaProducto() {
           {/* Precio y Estado del Stock */}
           <div className="bg-themeInput/30 border border-themeBorder/60 p-5 rounded-2xl space-y-4">
             <div className="flex justify-between items-center">
-              <div>
-                <p className="text-[10px] text-themeTextMuted font-bold uppercase tracking-wider">Precio del hardware</p>
-                <p className="text-2xl md:text-3xl font-black text-themeAccent mt-0.5">{precioFormateado}</p>
+              <div className="flex-1">
+                <p className="text-[10px] text-themeTextMuted font-bold uppercase tracking-wider mb-1">Precio del hardware</p>
+                <div className="flex items-end gap-3 mt-0.5">
+                  <p className="text-3xl md:text-4xl font-black text-themeAccent tracking-tight">{precioFinalFormateado}</p>
+                </div>
+                {tieneDescuento && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-sm text-themeTextMuted line-through opacity-70">
+                      {precioOriginalFormateado}
+                    </p>
+                    <span className="bg-gradient-to-r from-orange-500 via-red-500 to-orange-500 text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md shadow-orange-500/30 shadow-sm animate-gradient bg-[length:200%_auto] flex items-center gap-1">
+                      <span className="animate-pulse">🔥</span> AHORRAS {producto.descuento}%
+                    </span>
+                  </div>
+                )}
               </div>
               
               <div>
@@ -559,9 +597,15 @@ export default function PaginaProducto() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5">
                         <img 
-                          src={res.profiles?.avatar_url && res.profiles.avatar_url !== 'null' ? res.profiles.avatar_url : `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`} 
+                          src={
+                            res.profiles?.avatar_url && res.profiles.avatar_url !== 'null'
+                              ? res.profiles.avatar_url.startsWith('http')
+                                ? res.profiles.avatar_url
+                                : `https://${import.meta.env.VITE_SUPABASE_URL?.replace('https://', '')}/storage/v1/object/public/avatars/${res.profiles.avatar_url}`
+                              : `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`
+                          }
                           alt="Avatar" 
-                          className="w-8 h-8 rounded-lg bg-themeInput p-0.5 border border-themeBorder/40"
+                          className="w-8 h-8 rounded-lg bg-themeInput p-0.5 border border-themeBorder/40 object-cover"
                           onError={(e) => {
                             (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/bottts/svg?seed=${res.id}`;
                           }}
@@ -652,7 +696,7 @@ export default function PaginaProducto() {
               onClick={(e) => e.stopPropagation()}
             >
               <img 
-                src={imagenActiva.replace('&w=600', '&w=1600')} 
+                src={(imagenActiva || '').replace('&w=600', '&w=1600')} 
                 alt={producto.nombre} 
                 draggable={false}
                 onClick={() => {
@@ -723,6 +767,13 @@ export default function PaginaProducto() {
         </div>,
         document.body
       )}
+
+      {/* Modal de administración */}
+      <AdminProductoModal 
+        isOpen={modalEditOpen} 
+        onClose={cargarDetalles} 
+        productoAEditar={producto}
+      />
 
     </div>
   );

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
-import { X, Settings, Check, User, ShieldAlert, Palette, Loader2, Upload } from 'lucide-react';
+import { useProductos } from '../hooks/useProductos';
+import { X, Settings, Check, User, ShieldAlert, Palette, Loader2, Upload, Package } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SettingsModalProps {
@@ -24,13 +25,65 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [guardandoUser, setGuardandoUser] = useState(false);
   const [subiendoAvatar, setSubiendoAvatar] = useState(false);
 
+  // Estados Admin
+  const { productos, bulkUpdateStock, bulkCategoryDiscount } = useProductos();
+  const [catDiscounts, setCatDiscounts] = useState<Record<string, number | ''>>({});
+  const [bulkLoading, setBulkLoading] = useState<string | null>(null);
+
+  const adminStats = (() => {
+    let total = 0, sinStock = 0, conDescuento = 0, valorTotal = 0;
+    productos.forEach(p => {
+      total++;
+      if (p.stock === 0) sinStock++;
+      if (p.descuento && p.descuento > 0) conDescuento++;
+      valorTotal += p.precio * (p.stock ?? 10) * (1 - (p.descuento ?? 0) / 100);
+    });
+    return { total, sinStock, conDescuento, valorTotal: Math.round(valorTotal) };
+  })();
+
+  const handleAgotarTodo = async () => {
+    if (!confirm('¿Estás seguro de que quieres poner en 0 el stock de TODOS los productos?')) return;
+    setBulkLoading('agotar');
+    try {
+      await bulkUpdateStock(0);
+      toast.success('Stock actualizado a 0 para todos los productos.');
+    } catch (e) {
+      toast.error('Error al agotar inventario');
+    }
+    setBulkLoading(null);
+  };
+
+  const handleRestaurarStock = async () => {
+    if (!confirm('¿Estás seguro de que quieres poner 10 de stock a TODOS los productos?')) return;
+    setBulkLoading('restaurar');
+    try {
+      await bulkUpdateStock(10);
+      toast.success('Stock restaurado a 10 para todos los productos.');
+    } catch (e) {
+      toast.error('Error al restaurar inventario');
+    }
+    setBulkLoading(null);
+  };
+
+  const handleApplyCategoryDiscount = async (cat: string) => {
+    const d = catDiscounts[cat];
+    if (d === '' || d === undefined) return;
+    setBulkLoading(`discount-${cat}`);
+    try {
+      await bulkCategoryDiscount(cat, Number(d));
+      toast.success(`Descuento de ${d}% aplicado a la categoría ${cat}.`);
+    } catch (e) {
+      toast.error(`Error al aplicar descuento a ${cat}`);
+    }
+    setBulkLoading(null);
+  };
+
   // Sincronizar inputs al abrir el modal o cambiar datos
   useEffect(() => {
     if (isOpen) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setNumInput(whatsappNumber);
       setUserInput(username || '');
-      setTabActiva('apariencia');
     }
   }, [whatsappNumber, username, isOpen]);
 
@@ -215,7 +268,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Contenido desplazable */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" data-lenis-prevent>
 
           {/* pestaña 1: APARIENCIA */}
           {tabActiva === 'apariencia' && (
@@ -371,13 +424,37 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex gap-3 text-red-500">
                 <ShieldAlert size={20} className="shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-black uppercase tracking-wider">ÁREA ADMINISTRATIVA</h4>
+                  <h4 className="text-xs font-black uppercase tracking-wider">PANEL DE CONTROL</h4>
                   <p className="text-[10px] font-medium leading-relaxed mt-1">
-                    Como administrador de NEXUS//CORE, tienes control exclusivo sobre la pasarela de redirección y números de envío telefónico.
+                    Control total de NEXUS//CORE. Gestión de inventario, descuentos y configuración de la tienda.
                   </p>
                 </div>
               </div>
 
+              {/* ESTADÍSTICAS DEL INVENTARIO */}
+              <section className="border-t border-themeBorder/40 pt-5">
+                <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Estado del Inventario</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-themeInput/30 border border-themeBorder/60 p-3.5 rounded-2xl text-center">
+                    <p className="text-2xl font-black text-themeAccent">{adminStats.total}</p>
+                    <p className="text-[9px] font-bold text-themeTextMuted uppercase tracking-wider mt-1">Productos</p>
+                  </div>
+                  <div className="bg-themeInput/30 border border-themeBorder/60 p-3.5 rounded-2xl text-center">
+                    <p className={`text-2xl font-black ${adminStats.sinStock > 0 ? 'text-red-500' : 'text-emerald-500'}`}>{adminStats.sinStock}</p>
+                    <p className="text-[9px] font-bold text-themeTextMuted uppercase tracking-wider mt-1">Sin Stock</p>
+                  </div>
+                  <div className="bg-themeInput/30 border border-themeBorder/60 p-3.5 rounded-2xl text-center">
+                    <p className="text-2xl font-black text-emerald-500">{adminStats.conDescuento}</p>
+                    <p className="text-[9px] font-bold text-themeTextMuted uppercase tracking-wider mt-1">En Oferta</p>
+                  </div>
+                </div>
+                <div className="mt-3 bg-themeInput/30 border border-themeBorder/60 p-4 rounded-2xl">
+                  <p className="text-[9px] font-bold text-themeTextMuted uppercase tracking-wider">Valor Total del Inventario</p>
+                  <p className="text-xl font-black text-themeText mt-1">${adminStats.valorTotal.toLocaleString()} <span className="text-xs text-themeTextMuted">COP</span></p>
+                </div>
+              </section>
+
+              {/* WHATSAPP */}
               <section className="border-t border-themeBorder/40 pt-5">
                 <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">WhatsApp de Pedidos</h3>
                 <div className="flex gap-2">
@@ -390,15 +467,77 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   />
                   <button
                     onClick={handleSaveNumber}
-                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2.5 rounded-xl text-xs font-black transition-all active:scale-95 shadow-md shadow-red-500/10"
+                    className="bg-themeAccent hover:bg-themeAccentHover text-white px-4 py-2.5 rounded-xl text-xs font-black transition-all active:scale-95 shadow-md shadow-themeAccent/10"
                   >
                     Guardar
                   </button>
                 </div>
-                <p className="text-[10px] text-themeTextMuted mt-2 leading-normal">
-                  Ingresa el código de país seguido del número sin espacios ni el signo "+". <br />
-                  Ejemplo: *573043104831* (Colombia) o *5215512345678* (México).
-                </p>
+                <p className="text-[10px] text-themeTextMuted mt-2">Código de país + número sin espacios.</p>
+              </section>
+
+              {/* DESCUENTOS POR CATEGORÍA */}
+              <section className="border-t border-themeBorder/40 pt-5">
+                <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Descuento por Categoría</h3>
+                <div className="space-y-3">
+                  {['Componentes', 'Periféricos'].map((cat) => (
+                    <div key={cat} className="flex items-center gap-3 bg-themeInput/30 border border-themeBorder/60 p-3.5 rounded-2xl">
+                      <span className="text-xs font-black text-themeText flex-1">{cat}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0" max="99"
+                          placeholder="0"
+                          value={catDiscounts[cat] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setCatDiscounts(prev => ({ ...prev, [cat]: '' }));
+                            } else {
+                              const num = parseInt(val, 10);
+                              if (!isNaN(num)) {
+                                setCatDiscounts(prev => ({ ...prev, [cat]: Math.min(99, Math.max(0, num)) }));
+                              }
+                            }
+                          }}
+                          className="w-16 px-3 py-2 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-black text-center focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+                        />
+                        <span className="text-xs text-themeTextMuted font-black">%</span>
+                        <button
+                          onClick={() => handleApplyCategoryDiscount(cat)}
+                          disabled={bulkLoading !== null}
+                          className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-xl text-[10px] font-black transition-all active:scale-95 disabled:opacity-50"
+                        >
+                          {bulkLoading === `discount-${cat}` ? <Loader2 size={12} className="animate-spin" /> : 'Aplicar'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-themeTextMuted mt-2">Aplica un % de descuento a todos los productos de una categoría.</p>
+              </section>
+
+              {/* ACCIONES MASIVAS */}
+              <section className="border-t border-themeBorder/40 pt-5">
+                <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Acciones Rápidas</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleAgotarTodo}
+                    disabled={bulkLoading !== null}
+                    className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 p-4 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2"
+                  >
+                    {bulkLoading === 'agotar' ? <Loader2 size={16} className="animate-spin" /> : <Package size={16} />}
+                    Agotar Todo
+                  </button>
+                  <button
+                    onClick={handleRestaurarStock}
+                    disabled={bulkLoading !== null}
+                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 p-4 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center gap-2"
+                  >
+                    {bulkLoading === 'restaurar' ? <Loader2 size={16} className="animate-spin" /> : <Package size={16} />}
+                    Restaurar (10 uds)
+                  </button>
+                </div>
+                <p className="text-[10px] text-themeTextMuted mt-2">Modifica el stock de TODOS los productos a la vez.</p>
               </section>
             </div>
           )}

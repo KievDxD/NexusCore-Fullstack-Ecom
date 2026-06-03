@@ -10,6 +10,7 @@ export interface Producto {
   categoria: string;
   descripcion: string;
   stock: number;
+  descuento?: number;
   descripcion_larga?: string;
   especificaciones?: Record<string, string>;
   marca?: string;

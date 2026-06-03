@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../hooks/useCarrito';
 import { useSettings, type Moneda } from '../hooks/useSettings';
-import { useAuth } from '../context/AuthContext'; // Asegúrate de tener este contexto
+import { useAuth } from '../context/AuthContext';
 import { ShoppingCart, Settings, Globe, User, LogOut } from 'lucide-react';
 import SettingsModal from './SettingsModal';
 import { toast } from 'sonner';
@@ -16,7 +16,8 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
   const { items } = useCarrito();
   const totalArticulos = items.reduce((sum, item) => sum + item.cantidad, 0);
   const { currency, setCurrency } = useSettings();
-  const { user, username, logout } = useAuth(); // Hook de autenticación
+  const { user, username, logout } = useAuth();
+  const navigate = useNavigate();
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
 
   // Lógica de Moneda
@@ -34,6 +35,7 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
     try {
       await logout();
       toast.success("Sesión cerrada correctamente");
+      navigate('/');
     } catch {
       toast.error("Error al cerrar sesión");
     }
@@ -44,11 +46,24 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
       <nav className="sticky top-0 z-50 bg-themeCard/80 backdrop-blur-xl border-b border-themeBorder/80 transition-all">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           
-          {/* Logo */}
-          <Link to="/" className="flex items-center cursor-pointer select-none group">
-            <span className="text-xl font-black tracking-tighter text-themeText">
+          {/* Logo minimalista responsivo (se adapta al color del tema como Spotify/YouTube) */}
+          <Link to="/" className="flex items-center gap-2.5 cursor-pointer select-none group">
+            <svg 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              className="w-7.5 h-7.5 text-themeAccent transition-transform duration-300 group-hover:scale-105"
+            >
+              {/* Contenedor redondeado con opacidad sutil del color de acento */}
+              <rect x="2" y="2" width="20" height="20" rx="6" className="fill-themeAccent/10 stroke-themeAccent/15" strokeWidth="1.5" />
+              {/* Isotipo N */}
+              <path d="M7 16V8l5 5.5V8" className="stroke-themeAccent" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              {/* Doble slash // */}
+              <path d="M14 14.5l1.5-4.5M16.5 14.5l1.5-4.5" className="stroke-themeAccent" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+            <span className="text-lg font-black tracking-tighter text-themeText flex items-center">
               NEXUS
-              <span className="text-themeAccent font-medium ml-1">//CORE</span>
+              <span className="text-themeAccent font-normal mx-0.5">//</span>
+              CORE
             </span>
           </Link>
 
@@ -58,12 +73,12 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
             {/* Login / Perfil */}
             {user ? (
               <div className="flex items-center gap-2 mr-2">
-                <span className="text-xs font-bold text-themeTextMuted hidden md:block">
+                <span className="text-xs font-bold text-themeTextMuted hidden md:block truncate max-w-[120px]">
                   @{username || user.email?.split('@')[0]}
                 </span>
                 <button 
                   onClick={handleLogout}
-                  className="p-2 text-themeTextMuted hover:text-red-400 hover:bg-themeInput rounded-full transition-all"
+                  className="p-2 text-themeTextMuted hover:text-red-400 hover:bg-themeInput rounded-full transition-all active:scale-95"
                   title="Cerrar sesión"
                 >
                   <LogOut size={18} />

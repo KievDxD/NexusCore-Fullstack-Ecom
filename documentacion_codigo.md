@@ -43,7 +43,8 @@ El sistema sigue una arquitectura SPA (Single Page Application) basada en **Vite
 - **SettingsModal (`src/components/SettingsModal.tsx`)**: Modal multitab que permite:
   - **Apariencia**: Modificar el tema cromático de fondo global y la divisa activa.
   - **Mi Perfil**: Cambiar el nombre de usuario de la cuenta y actualizar su avatar (subiendo un archivo a Supabase Storage o escogiendo uno predeterminado).
-  - **Admin**: Configurar el número de teléfono de destino para pedidos (exclusivo para usuarios con rol de administrador en Supabase).
+  - **Admin**: Panel de control con métricas en tiempo real, gestión del número de WhatsApp, aplicación masiva de descuentos por categoría y acciones de emergencia sobre el stock global.
+- **ErrorBoundary (`src/components/ErrorBoundary.tsx`)**: Interceptor global de errores de React que evita que la aplicación se congele ante excepciones no controladas. Provee un mecanismo de "cierre de sesión de emergencia" que limpia exhaustivamente el almacenamiento local y la sesión de Supabase para desatascar bucles de error.
 
 ---
 
@@ -51,7 +52,7 @@ El sistema sigue una arquitectura SPA (Single Page Application) basada en **Vite
 
 - **AuthContext (`src/context/AuthContext.tsx`)**: Administra la sesión del usuario conectado contra Supabase Auth. Escucha cambios de sesión (`onAuthStateChange`), inicializa perfiles desde la tabla relacional `perfiles`, e implementa helpers para subida de avatares a buckets de almacenamiento y actualización de perfiles y nombres de usuario.
 - **useCarrito (`src/hooks/useCarrito.ts`)**: Estado global ligero y persistido de la cesta de compras programado sobre **Zustand**. Valida los límites de adición contrastándolos con el stock máximo disponible del artículo.
-- **useProductos (`src/hooks/useProductos.ts`)**: Encapsula las llamadas directas de Supabase para obtener catálogos filtrados por categoría, buscar términos específicos, consultar detalles individuales por ID y publicar reseñas asociadas a un producto.
+- **useProductos (`src/hooks/useProductos.ts`)**: Encapsula las llamadas directas de Supabase para obtener catálogos filtrados por categoría, buscar términos específicos, consultar detalles individuales por ID y publicar reseñas asociadas a un producto. Incluye soporte para mutaciones masivas (`bulkUpdateStock`, `bulkCategoryDiscount`).
 - **useSettings (`src/hooks/useSettings.ts`)**: Estado global sobre Zustand que manipula configuraciones visuales (tema claro, oscuro, minimalista) y la divisa base para la conversión automatizada de precios.
 
 ---
@@ -59,7 +60,7 @@ El sistema sigue una arquitectura SPA (Single Page Application) basada en **Vite
 ## 4. Estructura y Esquema de Base de Datos (Supabase)
 
 El backend de base de datos PostgreSQL está estructurado con las siguientes relaciones clave:
-- **`productos`**: ID, nombre, descripción, precio, categoría, stock, marca, especificaciones JSON y url de imagen.
+- **`productos`**: ID, nombre, descripción, precio, categoría, stock, descuento (%), marca, especificaciones JSON y url de imagen.
 - **`imagenes_producto`**: Relación uno a muchos con productos para galerías secundarias ordenadas.
 - **`perfiles`**: Tabla enlazada directamente con la tabla interna de usuarios de Supabase (`auth.users`), almacenando nombre de usuario, url de avatar, rol (ej: 'admin') y marcas temporales.
 - **`resenas`**: Tabla intermedia que vincula un usuario y un producto para almacenar puntuación, opiniones escritas y fechas de creación.

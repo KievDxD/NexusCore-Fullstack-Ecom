@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 45" fill="none">
+  <!-- Minimalist N in currentColor (adaptive) or default black/white -->
+  <path d="M10 32V12H15.5L25.5 31.5V12H30V32H24.5L14.5 16.5V32H10Z" fill="currentColor"/>
+  <!-- Double slash // -->
+  <path d="M34 26L37 14M38 26L41 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Text next to it -->
+  <text x="49" y="29" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="20" fill="currentColor" letter-spacing="-0.5">NEXUS</text>
+  <text x="123" y="29" font-family="system-ui, -apple-system, sans-serif" font-weight="300" font-size="20" fill="currentColor" letter-spacing="-0.5">//CORE</text>
+</svg>

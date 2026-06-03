@@ -5,17 +5,28 @@ import { useSettings } from "../hooks/useSettings";
 import { convertPrice, formatCurrency } from "../utils/currency";
 import "./TarjetaProducto.css";
 import { toast } from "sonner";
+import { useAuth } from "../context/AuthContext";
+import { Pencil } from "lucide-react";
+import AdminProductoModal from "./AdminProductoModal";
 
 export default function TarjetaProducto({ producto }: { producto: Producto }) {
   const agregarProducto = useCarrito((state) => state.agregarProducto);
   const { currency, rates } = useSettings();
+  const { isAdmin } = useAuth();
 
-  const precioConvertido = convertPrice(producto.precio, currency, rates);
-  const precioFormateado = formatCurrency(precioConvertido, currency);
+  const tieneDescuento = (producto.descuento ?? 0) > 0;
+  const precioOriginal = convertPrice(producto.precio, currency, rates);
+  const precioFinal = tieneDescuento 
+    ? convertPrice(producto.precio * (1 - (producto.descuento ?? 0) / 100), currency, rates)
+    : precioOriginal;
+    
+  const precioOriginalFormateado = formatCurrency(precioOriginal, currency);
+  const precioFinalFormateado = formatCurrency(precioFinal, currency);
 
   const [cantidad, setCantidad] = useState(1);
   const [estaAgregando, setEstaAgregando] = useState(false);
   const [animarNumero, setAnimarNumero] = useState(false);
+  const [modalEditOpen, setModalEditOpen] = useState(false);
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
@@ -58,18 +69,41 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
   };
 
   return (
-    <div className="product-card group relative">
+    <>
+      <div className="product-card group relative">
+        {/* Botón flotante de edición para administradores */}
+        {isAdmin && (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setModalEditOpen(true);
+            }}
+            className="absolute top-3 right-3 bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl z-10 shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            title="Editar Hardware"
+          >
+            <Pencil size={13} />
+          </button>
+        )}
       {/* Badges de inventario premium */}
-      {sinStock && (
-        <span className="absolute top-3 left-3 bg-red-600/90 text-white text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md z-10 shadow-lg backdrop-blur-sm">
-          Agotado
-        </span>
-      )}
-      {!sinStock && stockDisponible <= 3 && (
-        <span className="absolute top-3 left-3 bg-amber-500/90 text-white text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md z-10 shadow-lg backdrop-blur-sm animate-pulse">
-          ¡Últimas {stockDisponible} uds!
-        </span>
-      )}
+      <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">
+        {sinStock && (
+          <span className="bg-red-600/90 text-white text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md shadow-lg backdrop-blur-sm self-start">
+            Agotado
+          </span>
+        )}
+        {!sinStock && stockDisponible <= 3 && (
+          <span className="bg-amber-500/90 text-white text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md shadow-lg backdrop-blur-sm animate-pulse self-start">
+            ¡Últimas {stockDisponible} uds!
+          </span>
+        )}
+        {tieneDescuento && (
+          <span className="bg-gradient-to-r from-orange-500 via-red-500 to-orange-500 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg shadow-orange-500/30 shadow-lg backdrop-blur-md animate-gradient bg-[length:200%_auto] border border-white/20 flex items-center gap-1.5 self-start transition-transform hover:scale-110">
+            <span className="animate-pulse">🔥</span> 
+            <span>-{producto.descuento}%</span>
+          </span>
+        )}
+      </div>
 
       {/* Enlace al detalle del producto */}
       <Link to={`/producto/${producto.id}`} className="block focus:outline-none">
@@ -99,7 +133,14 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
           <h3 className="product-card__title group-hover:text-themeAccent transition-colors line-clamp-2 min-h-[40px]">
             {producto.nombre}
           </h3>
-          <p className="product-card__price mt-1">{precioFormateado}</p>
+          <div className="mt-1 flex items-center gap-2">
+            <p className="product-card__price">{precioFinalFormateado}</p>
+            {tieneDescuento && (
+              <p className="text-[10px] text-themeTextMuted line-through opacity-70">
+                {precioOriginalFormateado}
+              </p>
+            )}
+          </div>
         </div>
       </Link>
 
@@ -148,6 +189,14 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
           {sinStock ? "Agotado" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
         </button>
       </div>
-    </div>
+      </div>
+      
+      {/* Modal de edición */}
+      <AdminProductoModal 
+        isOpen={modalEditOpen} 
+        onClose={() => setModalEditOpen(false)} 
+        productoAEditar={producto} 
+      />
+    </>
   );
 }
