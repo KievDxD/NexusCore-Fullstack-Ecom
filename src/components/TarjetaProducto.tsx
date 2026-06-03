@@ -10,7 +10,7 @@ import { Pencil } from "lucide-react";
 import AdminProductoModal from "./AdminProductoModal";
 
 export default memo(function TarjetaProducto({ producto }: { producto: Producto }) {
-  const agregarProducto = useCarrito((state) => state.agregarProducto);
+  const { agregarProducto } = useCarrito();
   const { currency, rates } = useSettings();
   const { isAdmin } = useAuth();
 

@@ -26,7 +26,7 @@ export default function PaginaProducto() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { fetchProductoById } = useProductos();
-  const agregarProducto = useCarrito((state) => state.agregarProducto);
+  const { agregarProducto } = useCarrito();
   const { currency, rates } = useSettings();
   const { user, username, avatarUrl, isAdmin } = useAuth();
 
