@@ -1,4 +1,5 @@
-import { Component, ErrorInfo, ReactNode } from 'react';
+import { Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, LogOut, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 

@@ -292,11 +292,10 @@ export function useProductos() {
           finalProducto = { ...localProd, imagenes: [{ id: 0, url: localProd.imagen, orden: 0 }] };
         }
       } else {
-        finalProducto = { ...prodResult.data, imagenes: [{ id: 0, url: prodResult.data.imagen, orden: 0 }] };
-        // Si hay imágenes adicionales, cargarlas
-        if (imgsResult?.data && imgsResult.data.length > 0) {
-          finalProducto.imagenes = imgsResult.data;
-        }
+        finalProducto = { 
+          ...prodResult.data, 
+          imagenes: (imgsResult?.data && imgsResult.data.length > 0) ? imgsResult.data : [{ id: 0, url: prodResult.data.imagen, orden: 0 }] 
+        };
       }
 
       // 2. Procesar Reseñas
