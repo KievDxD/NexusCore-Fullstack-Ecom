@@ -181,6 +181,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       return;
     }
 
+    if (cleanUsername === username?.toLowerCase()) {
+      toast.info("Sin cambios", {
+        description: "Este ya es tu nombre de usuario actual.",
+      });
+      return;
+    }
+
     setGuardandoUser(true);
     try {
       await actualizarUsername(cleanUsername);
