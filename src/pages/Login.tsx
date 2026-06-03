@@ -65,14 +65,24 @@ export default function Login() {
           throw new Error("Las contraseñas no coinciden. Por favor verifícalas.");
         }
         
-        await registro(identificador, password, username.trim());
+        const autologin = await registro(identificador, password, username.trim());
         
-        toast.success('¡Registro exitoso!', {
-          description: `Bienvenido a NEXUS // CORE @${username.trim()}. Tu sesión ha sido iniciada.`,
-          duration: 3500,
-        });
-        
-        navigate('/');
+        if (autologin) {
+          toast.success('¡Registro exitoso!', {
+            description: `Bienvenido a NEXUS // CORE @${username.trim()}. Tu sesión ha sido iniciada.`,
+            duration: 3500,
+          });
+          navigate('/');
+        } else {
+          toast.success('¡Cuenta creada!', {
+            description: `Revisa tu correo (${identificador}) para confirmar tu cuenta.`,
+            duration: 5000,
+          });
+          setModo('login');
+          setMensajeExito('Por favor revisa tu bandeja de entrada o spam para confirmar tu correo electrónico antes de iniciar sesión.');
+          setPassword('');
+          setConfirmarPassword('');
+        }
 
       } else if (modo === 'recuperar') {
         // 🔑 RECUPERAR CONTRASEÑA

@@ -9,7 +9,7 @@ interface AuthContextType {
   avatarUrl: string | null;
   isAdmin: boolean;
   login: (emailOrUsername: string, pass: string) => Promise<void>;
-  registro: (email: string, pass: string, username: string) => Promise<void>;
+  registro: (email: string, pass: string, username: string) => Promise<boolean>;
   actualizarUsername: (nuevoUsername: string) => Promise<void>;
   actualizarAvatar: (nuevoAvatarUrl: string) => Promise<void>;
   subirAvatar: (file: File) => Promise<string>;
@@ -187,8 +187,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (error) throw error;
     
-    // Si se crea inmediatamente la sesión
-    if (data.user) {
+    // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
+    if (data.session && data.user) {
       setUser(data.user);
       // Garantizar que la UI se actualice inmediatamente con los datos locales de registro
       setRole('usuario');
@@ -197,7 +197,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Sincronizar el perfil real desde la base de datos (creado por el trigger)
       await fetchProfile(data.user.id, data.user.email);
+      return true;
     }
+    
+    return false; // Requiere confirmación de correo
   };
 
   const actualizarUsername = async (nuevoUsername: string) => {
@@ -306,41 +309,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    // 1. Limpiar estados locales de React de forma síncrona INMEDIATAMENTE
+    setUser(null);
+    setRole(null);
+    setUsername(null);
+    setAvatarUrl(null);
+
+    // 2. Borrar manualmente todas las claves de localStorage de Supabase
     try {
-      // Intentar signOut estándar (notifica al servidor y borra local)
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.warn("Error devuelto por Supabase signOut:", error);
-        // Si falla el servidor, forzar cierre local
-        await supabase.auth.signOut({ scope: 'local' });
-      }
-    } catch (err) {
-      console.warn("Excepción durante signOut:", err);
-      await supabase.auth.signOut({ scope: 'local' });
-    } finally {
-      // Siempre limpiar estados locales de React de forma síncrona
-      setUser(null);
-      setRole(null);
-      setUsername(null);
-      setAvatarUrl(null);
-
-      // Borrar manualmente todas las claves de localStorage de Supabase por si acaso
-      try {
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
-            keysToRemove.push(key);
-          }
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
+          keysToRemove.push(key);
         }
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-      } catch (e) {
-        console.warn("No se pudo limpiar localStorage manualmente:", e);
       }
-
-      // Reinicio nuclear de la app para asegurar la limpieza del estado
-      window.location.href = '/login';
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+    } catch (e) {
+      console.warn("No se pudo limpiar localStorage manualmente:", e);
     }
+
+    // 3. Forzar cierre local a nivel de Supabase sin esperar red
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (e) {
+      console.warn("Fallo en signOut local:", e);
+    }
+
+    // 4. Enviar señal de cierre al servidor en background (sin await para no bloquear)
+    supabase.auth.signOut().catch(err => console.warn("Fallo al notificar signOut al servidor:", err));
+
+    // 5. Reinicio nuclear de la app para asegurar la limpieza del estado visual
+    window.location.href = '/login';
   };
 
   const isAdmin = role === 'admin';

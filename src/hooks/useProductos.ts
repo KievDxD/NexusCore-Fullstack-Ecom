@@ -7,8 +7,8 @@ import { LISTA_PRODUCTOS } from '../data/productos';
 interface ProductosState {
   productos: Producto[];
   cargando: boolean;
-  yaIntento: boolean;
-  fetchProductos: () => Promise<void>;
+  ultimaActualizacion: number;
+  fetchProductos: (force?: boolean) => Promise<void>;
   agregarProductoStore: (nuevoProd: Omit<Producto, 'id'>) => Promise<Producto>;
   actualizarProductoStore: (id: number, cambios: Partial<Producto>) => Promise<void>;
   eliminarProductoStore: (id: number) => Promise<void>;
@@ -19,10 +19,15 @@ interface ProductosState {
 export const useProductosStore = create<ProductosState>((set, get) => ({
   productos: LISTA_PRODUCTOS, // <-- Stale-While-Revalidate: Inicializamos con datos locales instantáneamente
   cargando: false, // <-- No bloqueamos la UI inicial
-  yaIntento: false,
-  fetchProductos: async () => {
-    if (get().yaIntento) return;
-    set({ yaIntento: true }); // Marcamos intento pero no bloqueamos con cargando: true
+  ultimaActualizacion: 0,
+  fetchProductos: async (force = false) => {
+    const ahora = Date.now();
+    const { ultimaActualizacion, cargando } = get();
+    
+    // Evitamos peticiones concurrentes o re-fetch si han pasado menos de 2 minutos (120,000ms), salvo que sea forzado
+    if (cargando || (!force && ahora - ultimaActualizacion < 120000)) return;
+    
+    set({ cargando: true }); 
 
     // Damos más tiempo a Supabase para despertar (cold start del free tier)
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
@@ -44,12 +49,14 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
 
       if (error || !data || data.length === 0) {
         console.warn("Mantenemos catalogo local (fallback) debido a error o base de datos vacia");
+        set({ cargando: false });
       } else {
         // Solo actualizamos si Supabase tiene datos reales
-        set({ productos: data });
+        set({ productos: data, ultimaActualizacion: Date.now(), cargando: false });
       }
     } catch (err) {
       console.error("Error inesperado en fetch de productos, manteniendo fallback local:", err);
+      set({ cargando: false });
     }
   },
 
@@ -238,10 +245,12 @@ export function useProductos() {
   } = useProductosStore();
 
   useEffect(() => {
-    if (!useProductosStore.getState().yaIntento) {
-      fetchProductos();
-    }
+    // Al montar el hook, intentamos un fetch si la caché está fría (más de 2 min)
+    fetchProductos();
   }, [fetchProductos]);
+
+  // Hook expuesto para forzar un refetch saltándose la caché
+  const refetchProductosForzado = useCallback(() => fetchProductos(true), [fetchProductos]);
 
   const fetchProductoById = useCallback(async (id: number) => {
     // Definir un timeout de 2.5 segundos para la consulta de base de datos
@@ -359,7 +368,7 @@ export function useProductos() {
     productos, 
     cargando, 
     fetchProductoById, 
-    refetchProductos: fetchProductos,
+    refetchProductos: refetchProductosForzado,
     agregarProductoStore,
     actualizarProductoStore,
     eliminarProductoStore,
