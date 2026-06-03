@@ -210,15 +210,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       // 1. Verificar si el username ya está en uso por OTRO usuario
-      const { data: existente } = await supabase
-        .from('profiles')
-        .select('id')
-        .ilike('username', cleanUsername)
-        .neq('id', user.id)
-        .maybeSingle();
+      // Optimizacion: Si solo esta cambiando mayusculas/minusculas, no hacer el select
+      if (cleanUsername.toLowerCase() !== username?.toLowerCase()) {
+        const { data: existente } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('username', cleanUsername)
+          .neq('id', user.id)
+          .maybeSingle();
 
-      if (existente) {
-        throw new Error(`El nombre de usuario "@${cleanUsername}" ya está en uso. Por favor, elige otro.`);
+        if (existente) {
+          throw new Error(`El nombre de usuario "@${cleanUsername}" ya está en uso. Por favor, elige otro.`);
+        }
       }
 
       // 2. Hacer upsert del perfil completo
