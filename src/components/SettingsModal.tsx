@@ -172,7 +172,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const handleSaveUsername = async () => {
     if (!user) return;
-    const cleanUsername = userInput.trim().toLowerCase();
+    const cleanUsername = userInput.trim();
     
     if (cleanUsername.length < 3) {
       toast.error("Nombre de usuario muy corto", {
@@ -181,7 +181,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       return;
     }
 
-    if (cleanUsername === username?.toLowerCase()) {
+    if (cleanUsername === username) {
       toast.info("Sin cambios", {
         description: "Este ya es tu nombre de usuario actual.",
       });

@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const registro = async (email: string, pass: string, usernameStr: string) => {
-    const cleanUsername = usernameStr.trim().toLowerCase();
+    const cleanUsername = usernameStr.trim();
     const cleanEmail = email.trim().toLowerCase();
 
     // 1. Pre-validar en base de datos usando la RPC unificada
@@ -202,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const actualizarUsername = async (nuevoUsername: string) => {
     if (!user) throw new Error('No hay sesión activa.');
-    const cleanUsername = nuevoUsername.trim().toLowerCase();
+    const cleanUsername = nuevoUsername.trim();
 
     if (cleanUsername.length < 3) {
       throw new Error('El username debe tener al menos 3 caracteres.');
@@ -213,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: existente } = await supabase
         .from('profiles')
         .select('id')
-        .eq('username', cleanUsername)
+        .ilike('username', cleanUsername)
         .neq('id', user.id)
         .maybeSingle();
 

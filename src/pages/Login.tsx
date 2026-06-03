@@ -68,7 +68,7 @@ export default function Login() {
         await registro(identificador, password, username.trim());
         
         toast.success('¡Registro exitoso!', {
-          description: `Bienvenido a NEXUS // CORE @${username.toLowerCase()}. Tu sesión ha sido iniciada.`,
+          description: `Bienvenido a NEXUS // CORE @${username.trim()}. Tu sesión ha sido iniciada.`,
           duration: 3500,
         });
         
@@ -199,7 +199,7 @@ export default function Login() {
                   type="text"
                   required
                   value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').toLowerCase())}
+                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))}
                   className="w-full pl-11 pr-4 py-3 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-semibold placeholder-themeTextMuted/30 focus:outline-none focus:border-themeAccent focus:ring-2 focus:ring-themeAccent/10 transition-all"
                   placeholder="ej. kiev_builder"
                   minLength={3}
