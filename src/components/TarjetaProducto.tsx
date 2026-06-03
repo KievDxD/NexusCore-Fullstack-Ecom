@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Link } from "react-router-dom";
 import { useCarrito, type Producto } from "../hooks/useCarrito"; 
 import { useSettings } from "../hooks/useSettings"; 
@@ -9,7 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { Pencil } from "lucide-react";
 import AdminProductoModal from "./AdminProductoModal";
 
-export default function TarjetaProducto({ producto }: { producto: Producto }) {
+export default memo(function TarjetaProducto({ producto }: { producto: Producto }) {
   const agregarProducto = useCarrito((state) => state.agregarProducto);
   const { currency, rates } = useSettings();
   const { isAdmin } = useAuth();
@@ -113,6 +113,9 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
             src={producto.imagen} 
             alt={producto.nombre} 
             loading="lazy"
+            decoding="async"
+            width={600}
+            height={400}
             className="product-card__image group-hover:scale-105 transition-transform duration-500"
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
@@ -199,4 +202,4 @@ export default function TarjetaProducto({ producto }: { producto: Producto }) {
       />
     </>
   );
-}
+});

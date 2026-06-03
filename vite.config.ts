@@ -16,8 +16,14 @@ export default defineConfig({
     minify: 'esbuild',
     // Target moderno para bundles más pequeños
     target: 'es2020',
+    // Asegurar que cada build genera hashes únicos para cache-busting
+    assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
+        // Hash en los nombres de archivo para cache-busting automático
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('react-dom') || id.includes('react') || id.includes('scheduler')) {
@@ -34,6 +40,9 @@ export default defineConfig({
             }
             if (id.includes('zustand')) {
               return 'state';
+            }
+            if (id.includes('lenis')) {
+              return 'lenis';
             }
             return 'vendor';
           }
