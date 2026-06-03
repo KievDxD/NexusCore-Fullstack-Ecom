@@ -180,7 +180,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: cleanEmail,
       password: pass,
       options: {
-        data: { username: cleanUsername }
+        data: { username: cleanUsername },
+        emailRedirectTo: window.location.origin
       }
     });
 
