@@ -105,6 +105,7 @@ export default function PaginaProducto() {
         setResenas(res.resenas || []);
         // Inicializar la imagen activa de forma segura
         const validImgs = res.producto.imagenes && res.producto.imagenes.length > 0
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ? res.producto.imagenes.map((img: any) => img.url).filter(Boolean)
           : [];
         const defaultImg = validImgs.length > 0 ? validImgs[0] : (res.producto.imagen || '');
@@ -122,6 +123,7 @@ export default function PaginaProducto() {
   }, [id, fetchProductoById, navigate]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     cargarDetalles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);

@@ -238,8 +238,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUsername(cleanUsername);
     } catch (err) {
       console.error("Error al actualizar username:", err);
-      const errorMsg = err instanceof Error ? err.message : (err as any)?.message || String(err);
-      throw new Error(errorMsg);
+      const errorMsg = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || String(err);
+      throw new Error(String(errorMsg), { cause: err });
     }
   };
 
@@ -262,8 +262,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAvatarUrl(nuevoAvatarUrl);
     } catch (err) {
       console.error("Error al actualizar avatar:", err);
-      const errorMsg = err instanceof Error ? err.message : (err as any)?.message || String(err);
-      throw new Error(errorMsg);
+      const errorMsg = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || String(err);
+      throw new Error(String(errorMsg), { cause: err });
     }
   };
 

@@ -109,7 +109,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     } catch (err) {
       console.error("Error en agregarProductoStore:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg);
+      throw new Error(msg, { cause: err });
     }
   },
 
@@ -162,7 +162,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     } catch (err) {
       console.error("Error en actualizarProductoStore:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg);
+      throw new Error(msg, { cause: err });
     }
   },
 
@@ -183,7 +183,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     } catch (err) {
       console.error("Error en eliminarProductoStore:", err);
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg);
+      throw new Error(msg, { cause: err });
     }
   },
 
@@ -273,6 +273,7 @@ export function useProductos() {
     const result = await Promise.race([fetchDataPromise, dbTimeout]);
 
     let finalProducto: Producto | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let finalResenas: any[] = [];
     const localProd = LISTA_PRODUCTOS.find(p => p.id === id);
 
@@ -312,6 +313,7 @@ export function useProductos() {
           if (resenasFallback && resenasFallback.length > 0) {
             const userIds = resenasFallback.map(r => r.user_id).filter(Boolean);
             const uniqueUserIds = [...new Set(userIds)];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const profilesMap: Record<string, any> = {};
 
             if (uniqueUserIds.length > 0) {
@@ -336,6 +338,7 @@ export function useProductos() {
           console.error("Error definitivo al cargar reseñas fallback:", fallbackErr);
         }
       } else if (resenasResult?.data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         finalResenas = resenasResult.data.map((r: any) => ({
           id: r.id,
           puntuacion: r.puntuacion,

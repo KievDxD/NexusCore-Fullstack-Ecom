@@ -63,6 +63,7 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
   // Cargar datos
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMostrarConfirmarEliminar(false);
       if (productoAEditar) {
         setNombre(productoAEditar.nombre || '');
@@ -197,9 +198,9 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
         toast.success("¡Nuevo producto agregado al catálogo!");
       }
       handleClose();
-    } catch (err: any) {
+    } catch (err) {
       toast.error("Error crítico al guardar", {
-        description: err.message || "Por favor, verifica tu conexión e inténtalo de nuevo."
+        description: err instanceof Error ? err.message : "Por favor, verifica tu conexión e inténtalo de nuevo."
       });
     } finally {
       setCargando(false);
@@ -213,8 +214,8 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
       await eliminarProductoStore(productoAEditar.id);
       toast.success("Producto eliminado permanentemente.");
       handleClose();
-    } catch (err: any) {
-      toast.error("Error al eliminar", { description: err.message });
+    } catch (err) {
+      toast.error("Error al eliminar", { description: err instanceof Error ? err.message : String(err) });
     } finally {
       setCargando(false);
       setMostrarConfirmarEliminar(false);

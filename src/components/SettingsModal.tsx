@@ -47,7 +47,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     try {
       await bulkUpdateStock(0);
       toast.success('Stock actualizado a 0 para todos los productos.');
-    } catch (e) {
+    } catch {
       toast.error('Error al agotar inventario');
     }
     setBulkLoading(null);
@@ -59,7 +59,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     try {
       await bulkUpdateStock(10);
       toast.success('Stock restaurado a 10 para todos los productos.');
-    } catch (e) {
+    } catch {
       toast.error('Error al restaurar inventario');
     }
     setBulkLoading(null);
@@ -72,7 +72,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     try {
       await bulkCategoryDiscount(cat, Number(d));
       toast.success(`Descuento de ${d}% aplicado a la categoría ${cat}.`);
-    } catch (e) {
+    } catch {
       toast.error(`Error al aplicar descuento a ${cat}`);
     }
     setBulkLoading(null);
