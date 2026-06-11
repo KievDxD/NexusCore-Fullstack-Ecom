@@ -1,20 +1,23 @@
+import { useState } from 'react';
 import { useCarrito } from '../hooks/useCarrito';
 import { useSettings } from '../hooks/useSettings';
 import { convertPrice, formatCurrency } from '../utils/currency';
-import { X, Trash2, ShoppingBag } from 'lucide-react';
+import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '../lib/supabase';
-import { useProductos } from '../hooks/useProductos';
 
 interface CarritoSidebarProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+// Placeholder SVG como data-URI para no depender de servicios externos
+const IMAGE_FALLBACK =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400' fill='%231e293b'%3E%3Crect width='600' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23475569' font-size='24' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";
+
 export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps) {
   const { items, eliminarProducto, limpiarCarrito } = useCarrito();
   const { currency, rates, whatsappNumber } = useSettings();
-  const { refetchProductos } = useProductos();
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // 💰 Calcular el precio total acumulado
   const totalOriginal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
@@ -23,33 +26,14 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
 
   // 📱 Función para armar el mensaje de texto y mandarlo a WhatsApp
   const enviarPedidoWhatsApp = async () => {
-    if (items.length === 0) return;
+    if (items.length === 0 || isProcessing) return;
 
-    // 1. Preparar datos para validar y descontar stock en la base de datos
-    const itemsParaDescontar = items.map((item) => ({
-      id: item.id,
-      cantidad: item.cantidad
-    }));
+    setIsProcessing(true);
 
     try {
-      toast.loading("Procesando pedido y verificando stock...", { id: "checkout" });
-      
-      const { error: checkoutError } = await supabase.rpc('finalizar_compra', {
-        items_json: itemsParaDescontar
-      });
-
-      if (checkoutError) {
-        console.error("Error al finalizar compra:", checkoutError.message);
-        toast.error("No se pudo procesar la compra", {
-          id: "checkout",
-          description: checkoutError.message || "Por favor, revisa el stock disponible."
-        });
-        return;
-      }
-
-      // 2. Si la transacción en base de datos es exitosa, armar el mensaje de WhatsApp
+      // 1. Armar el mensaje de WhatsApp directamente (sin RPC de stock)
       let mensaje = `👋 ¡Hola! Me gustaría realizar el siguiente pedido:\n\n`;
-      
+
       items.forEach((item) => {
         const precioItemConvertido = convertPrice(item.precio, currency, rates);
         const precioItemFormateado = formatCurrency(precioItemConvertido, currency);
@@ -61,21 +45,23 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
 
       // Codificamos el texto para que sea válido dentro de un enlace URL
       const mensajeCodificado = encodeURIComponent(mensaje);
-      
+
       // Usamos el número guardado en la configuración o el fallback
-      const numeroTelefono = whatsappNumber || "573043104831"; 
-      
-      toast.success("¡Stock reservado con éxito! Redirigiendo a WhatsApp...", { id: "checkout" });
+      const numeroTelefono = whatsappNumber || "573043104831";
+
+      toast.success("¡Redirigiendo a WhatsApp para confirmar tu pedido!", { id: "checkout" });
       window.open(`https://wa.me/${numeroTelefono}?text=${mensajeCodificado}`, '_blank');
-      
-      // 3. Limpiar carrito local, actualizar stock y cerrar barra lateral
+
+      // 2. Limpiar carrito local y cerrar barra lateral
       limpiarCarrito();
-      await refetchProductos();
       onClose();
 
     } catch (err) {
       console.error("Error inesperado en checkout:", err);
-      toast.error("Error inesperado al conectar con el servidor.", { id: "checkout" });
+      toast.error("Error inesperado al procesar el pedido.", { id: "checkout" });
+    } finally {
+      // Garantizar que el botón SIEMPRE se reactive
+      setIsProcessing(false);
     }
   };
 
@@ -135,7 +121,9 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
                       alt={item.nombre} 
                       className="w-16 h-16 rounded-lg object-cover border border-themeBorder flex-shrink-0"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
+                        const target = e.currentTarget;
+                        target.onerror = null; // Evitar bucle infinito si el fallback también falla
+                        target.src = IMAGE_FALLBACK;
                       }}
                     />
                     <div className="flex-1">
@@ -172,14 +160,23 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
             <div className="space-y-3">
               <button
                 onClick={enviarPedidoWhatsApp}
-                className="w-full flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all active:scale-[0.98]"
+                disabled={isProcessing}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-600/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all active:scale-[0.98]"
               >
-                Enviar pedido por WhatsApp
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Procesando...
+                  </>
+                ) : (
+                  'Enviar pedido por WhatsApp'
+                )}
               </button>
               
               <button
                 onClick={handleVaciarCarrito}
-                className="w-full text-center text-xs font-semibold text-themeTextMuted hover:text-red-500 py-1 transition-colors"
+                disabled={isProcessing}
+                className="w-full text-center text-xs font-semibold text-themeTextMuted hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed py-1 transition-colors"
               >
                 Vaciar todo el carrito
               </button>

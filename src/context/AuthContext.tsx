@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { type User } from '@supabase/supabase-js'; // El tipo oficial de Supabase
+import { toast } from 'sonner';
 
 interface AuthContextType {
   user: User | null;
@@ -79,12 +80,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setRole(null);
           setUsername(null);
           setAvatarUrl(null);
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
-              localStorage.removeItem(key);
-            }
-          }
+          // Snapshot estático de claves para evitar desync de índices al borrar
+          Object.keys(localStorage)
+            .filter(key => key.startsWith('sb-') || key.includes('supabase.auth'))
+            .forEach(key => localStorage.removeItem(key));
           return;
         }
 
@@ -157,6 +156,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const cleanUsername = usernameStr.trim();
     const cleanEmail = email.trim().toLowerCase();
 
+    // ── Validaciones de formato en cliente ──────────────────────────────
+    if (cleanUsername.length < 3) {
+      toast.error('El nombre de usuario debe tener al menos 3 caracteres.');
+      throw new Error('El nombre de usuario debe tener al menos 3 caracteres.');
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      toast.error('Por favor ingresa un correo electrónico válido.');
+      throw new Error('Formato de correo electrónico inválido.');
+    }
+
     // 1. Pre-validar en base de datos usando la RPC unificada
     const { data: checkData, error: checkError } = await supabase.rpc('check_user_exists', {
       email_to_check: cleanEmail,
@@ -175,32 +186,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Ejecutar registro de Supabase
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: pass,
-      options: {
-        data: { username: cleanUsername },
-        emailRedirectTo: window.location.origin
+    // 2. Ejecutar registro de Supabase con manejo explícito de errores
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: pass,
+        options: {
+          data: { username: cleanUsername },
+          emailRedirectTo: window.location.origin
+        }
+      });
+
+      if (error) {
+        // Capturar errores conocidos de Supabase y mostrarlos con toast
+        if (error.message.includes('User already registered')) {
+          toast.error('Este correo ya está registrado. Intenta iniciar sesión.');
+        } else if (error.message.includes('Password should be at least 6 characters')) {
+          toast.error('La contraseña debe tener al menos 6 caracteres.');
+        } else {
+          toast.error(error.message || 'Error al crear la cuenta.');
+        }
+        throw error;
       }
-    });
 
-    if (error) throw error;
-    
-    // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
-    if (data.session && data.user) {
-      setUser(data.user);
-      // Garantizar que la UI se actualice inmediatamente con los datos locales de registro
-      setRole('usuario');
-      setUsername(cleanUsername);
-      setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${data.user.id}`);
+      // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
+      if (data.session && data.user) {
+        setUser(data.user);
+        // Garantizar que la UI se actualice inmediatamente con los datos locales de registro
+        setRole('usuario');
+        setUsername(cleanUsername);
+        setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${data.user.id}`);
 
-      // Sincronizar el perfil real desde la base de datos (creado por el trigger)
-      await fetchProfile(data.user.id, data.user.email);
-      return true;
+        // Sincronizar el perfil real desde la base de datos (creado por el trigger)
+        await fetchProfile(data.user.id, data.user.email);
+        return true;
+      }
+
+      return false; // Requiere confirmación de correo
+    } catch (err) {
+      // Re-throw si ya es un Error procesado arriba
+      if (err instanceof Error) throw err;
+      toast.error('Error inesperado durante el registro.');
+      throw new Error('Error inesperado durante el registro.');
     }
-    
-    return false; // Requiere confirmación de correo
   };
 
   const actualizarUsername = async (nuevoUsername: string) => {
@@ -315,32 +343,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUsername(null);
     setAvatarUrl(null);
 
-    // 2. Borrar manualmente todas las claves de localStorage de Supabase
+    // 2. Purga segura de localStorage con snapshot estático de claves
     try {
-      const keysToRemove = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
-          keysToRemove.push(key);
-        }
-      }
-      keysToRemove.forEach(key => localStorage.removeItem(key));
+      Object.keys(localStorage)
+        .filter(key => key.startsWith('sb-') || key.includes('supabase.auth'))
+        .forEach(key => localStorage.removeItem(key));
     } catch (e) {
       console.warn("No se pudo limpiar localStorage manualmente:", e);
     }
 
-    // 3. Forzar cierre local a nivel de Supabase sin esperar red
+    // 3. Cerrar sesión GLOBAL (servidor + cliente) en una sola llamada
     try {
-      await supabase.auth.signOut({ scope: 'local' });
+      await supabase.auth.signOut({ scope: 'global' });
     } catch (e) {
-      console.warn("Fallo en signOut local:", e);
+      console.warn("Fallo en signOut global:", e);
     }
 
-    // 4. Enviar señal de cierre al servidor en background (sin await para no bloquear)
-    supabase.auth.signOut().catch(err => console.warn("Fallo al notificar signOut al servidor:", err));
-
-    // 5. Reinicio nuclear de la app para asegurar la limpieza del estado visual
-    window.location.href = '/login';
+    // onAuthStateChange detectará el SIGNED_OUT y redirigirá naturalmente.
+    // NO usamos window.location.href = '/login' para evitar un reload innecesario.
   };
 
   const isAdmin = role === 'admin';
