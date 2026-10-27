@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
 import { Loader2, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import AdminProductoModal from '../components/AdminProductoModal';
+import type { Producto } from '../types';
+
+// Un solo modal de administración (antes había uno por tarjeta) y solo se descarga si eres admin
+const AdminProductoModal = lazy(() => import('../components/AdminProductoModal'));
 
 export default function Home() {
   const [busqueda, setBusqueda] = useState('');
@@ -12,23 +15,33 @@ export default function Home() {
   // 🆕 Usamos nuestro hook premium con soporte de fallback local y control de stock
   const { productos: productosDB, cargando } = useProductos();
   const { isAdmin } = useAuth();
-  const [modalAddOpen, setModalAddOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [productoEnEdicion, setProductoEnEdicion] = useState<Producto | null>(null);
+
+  const abrirNuevo = useCallback(() => {
+    setProductoEnEdicion(null);
+    setModalOpen(true);
+  }, []);
+  const abrirEdicion = useCallback((p: Producto) => {
+    setProductoEnEdicion(p);
+    setModalOpen(true);
+  }, []);
+  const cerrarModal = useCallback(() => setModalOpen(false), []);
+
+  // La búsqueda se difiere para no bloquear la escritura con catálogos grandes
+  const busquedaDiferida = useDeferredValue(busqueda);
 
   // Ahora el filtro usa productosDB en lugar de la lista falsa y ordena por stock
-  const productosFiltrados = productosDB
-    .filter((producto) => {
-      const coincideBusqueda = producto.nombre.toLowerCase().includes(busqueda.toLowerCase());
+  const productosFiltrados = useMemo(() => {
+    const q = busquedaDiferida.trim().toLowerCase();
+    const filtrados = productosDB.filter((producto) => {
+      const coincideBusqueda = q === '' || producto.nombre.toLowerCase().includes(q);
       const coincideCategoria = categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
       return coincideBusqueda && coincideCategoria;
-    })
-    .sort((a, b) => {
-      // Los productos sin stock se van al final
-      const stockA = a.stock ?? 10;
-      const stockB = b.stock ?? 10;
-      if (stockA === 0 && stockB > 0) return 1;
-      if (stockB === 0 && stockA > 0) return -1;
-      return 0; // Si ambos tienen o no tienen stock, mantienen su orden natural
     });
+    // Los productos sin stock se van al final (sort estable: el resto conserva su orden)
+    return filtrados.sort((a, b) => Number((a.stock ?? 10) === 0) - Number((b.stock ?? 10) === 0));
+  }, [productosDB, busquedaDiferida, categoriaActiva]);
 
   return (
     <div id="catalogo" className="space-y-8 animate-fade-in">
@@ -72,7 +85,7 @@ export default function Home() {
           ))}
           {isAdmin && (
             <button
-              onClick={() => setModalAddOpen(true)}
+              onClick={abrirNuevo}
               className="px-4 py-2 text-xs md:text-sm font-black rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/15 flex items-center gap-1.5 shrink-0 transition-all active:scale-95 cursor-pointer ml-2"
             >
               <Plus size={14} />
@@ -83,7 +96,7 @@ export default function Home() {
       </div>
 
       {/* ⏳ PANTALLA DE CARGA */}
-      {cargando ? (
+      {cargando && productosDB.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-themeAccent">
           <Loader2 size={48} className="animate-spin mb-4" />
           <p className="text-themeTextMuted font-medium animate-pulse">Conectando con el inventario...</p>
@@ -93,7 +106,7 @@ export default function Home() {
         productosFiltrados.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {productosFiltrados.map((producto) => (
-              <TarjetaProducto key={producto.id} producto={producto} />
+              <TarjetaProducto key={producto.id} producto={producto} isAdmin={isAdmin} onEditar={abrirEdicion} />
             ))}
           </div>
         ) : (
@@ -111,12 +124,12 @@ export default function Home() {
         )
       )}
 
-      {/* Modal para agregar productos */}
-      <AdminProductoModal 
-        isOpen={modalAddOpen} 
-        onClose={() => setModalAddOpen(false)} 
-        productoAEditar={null} 
-      />
+      {/* Modal único para agregar / editar productos (solo administradores) */}
+      {isAdmin && (
+        <Suspense fallback={null}>
+          <AdminProductoModal isOpen={modalOpen} onClose={cerrarModal} productoAEditar={productoEnEdicion} />
+        </Suspense>
+      )}
     </div>
   );
 }

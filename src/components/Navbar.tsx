@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useCarrito } from '../hooks/useCarrito';
+import { useCarritoCount } from '../hooks/useCarrito';
 import { useSettings, type Moneda } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { ShoppingCart, Settings, Globe, User, LogOut } from 'lucide-react';
@@ -13,9 +13,9 @@ interface NavbarProps {
 
 export default function Navbar({ onAbrirCarrito }: NavbarProps) {
   // Estados y Hooks
-  const { items } = useCarrito();
-  const totalArticulos = items.reduce((sum, item) => sum + item.cantidad, 0);
-  const { currency, setCurrency } = useSettings();
+  const totalArticulos = useCarritoCount();
+  const currency = useSettings((s) => s.currency);
+  const setCurrency = useSettings((s) => s.setCurrency);
   const { user, username, logout } = useAuth();
   const navigate = useNavigate();
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
@@ -51,7 +51,7 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
             <svg 
               viewBox="0 0 24 24" 
               fill="none" 
-              className="w-7.5 h-7.5 text-themeAccent transition-transform duration-300 group-hover:scale-105"
+              className="w-[30px] h-[30px] text-themeAccent transition-transform duration-300 group-hover:scale-105"
             >
               {/* Contenedor redondeado con opacidad sutil del color de acento */}
               <rect x="2" y="2" width="20" height="20" rx="6" className="fill-themeAccent/10 stroke-themeAccent/15" strokeWidth="1.5" />

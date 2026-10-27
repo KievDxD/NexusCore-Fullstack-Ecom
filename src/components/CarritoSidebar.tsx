@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useCarrito } from '../hooks/useCarrito';
 import { useSettings } from '../hooks/useSettings';
-import { convertPrice, formatCurrency } from '../utils/currency';
+import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,18 +15,23 @@ const IMAGE_FALLBACK =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400' fill='%231e293b'%3E%3Crect width='600' height='400'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23475569' font-size='24' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";
 
 export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps) {
-  const { items, eliminarProducto, limpiarCarrito } = useCarrito();
-  const { currency, rates, whatsappNumber } = useSettings();
+  const { items, total, hayPendientes, eliminarProducto, limpiarCarrito } = useCarrito();
+  const currency = useSettings((s) => s.currency);
+  const rates = useSettings((s) => s.rates);
+  const whatsappNumber = useSettings((s) => s.whatsappNumber);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // 💰 Calcular el precio total acumulado
-  const totalOriginal = items.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
-  const totalConvertido = convertPrice(totalOriginal, currency, rates);
+  const totalConvertido = convertPrice(total, currency, rates);
   const totalFormateado = formatCurrency(totalConvertido, currency);
 
   // 📱 Función para armar el mensaje de texto y mandarlo a WhatsApp
   const enviarPedidoWhatsApp = async () => {
     if (items.length === 0 || isProcessing) return;
+    if (hayPendientes) {
+      toast.warning('Aun se esta sincronizando el catalogo. Intenta de nuevo en unos segundos.');
+      return;
+    }
 
     setIsProcessing(true);
 
@@ -35,7 +40,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
       let mensaje = `👋 ¡Hola! Me gustaría realizar el siguiente pedido:\n\n`;
 
       items.forEach((item) => {
-        const precioItemConvertido = convertPrice(item.precio, currency, rates);
+        const precioItemConvertido = convertPrice(precioConDescuento(item), currency, rates);
         const precioItemFormateado = formatCurrency(precioItemConvertido, currency);
         mensaje += `▪ *${item.cantidad}x* ${item.nombre} — (${precioItemFormateado} c/u)\n`;
       });
@@ -111,7 +116,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
           ) : (
             <div className="space-y-6">
               {items.map((item) => {
-                const itemPrecioConvertido = convertPrice(item.precio, currency, rates);
+                const itemPrecioConvertido = convertPrice(precioConDescuento(item), currency, rates);
                 const itemPrecioFormateado = formatCurrency(itemPrecioConvertido, currency);
                 
                 return (
@@ -160,7 +165,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
             <div className="space-y-3">
               <button
                 onClick={enviarPedidoWhatsApp}
-                disabled={isProcessing}
+                disabled={isProcessing || hayPendientes}
                 className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-600/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all active:scale-[0.98]"
               >
                 {isProcessing ? (

@@ -1,8 +1,11 @@
 import { useEffect, useCallback } from 'react';
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { type Producto } from './useCarrito';
+import type { Producto, ProductoImagen, Resena, ResenaPerfil } from '../types';
 import { LISTA_PRODUCTOS } from '../data/productos';
+
+const CACHE_TTL_MS = 120_000;
+const FETCH_TIMEOUT_MS = 8000;
 
 interface ProductosState {
   productos: Producto[];
@@ -16,53 +19,53 @@ interface ProductosState {
   bulkCategoryDiscount: (categoria: string, descuento: number) => Promise<void>;
 }
 
-export const useProductosStore = create<ProductosState>((set, get) => ({
-  productos: LISTA_PRODUCTOS, // <-- Stale-While-Revalidate: Inicializamos con datos locales instantáneamente
-  cargando: false, // <-- No bloqueamos la UI inicial
-  ultimaActualizacion: 0,
-  fetchProductos: async (force = false) => {
-    const ahora = Date.now();
-    const { ultimaActualizacion, cargando } = get();
-    
-    // Evitamos peticiones concurrentes o re-fetch si han pasado menos de 2 minutos (120,000ms), salvo que sea forzado
-    if (cargando || (!force && ahora - ultimaActualizacion < 120000)) return;
-    
-    set({ cargando: true }); 
+const toError = (err: unknown): Error => {
+  if (err instanceof Error) return err;
+  const msg = (err as { message?: unknown } | null)?.message;
+  return new Error(typeof msg === 'string' ? msg : String(err), { cause: err });
+};
 
-    // Damos más tiempo a Supabase para despertar (cold start del free tier)
-    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+export const useProductosStore = create<ProductosState>((set, get) => ({
+  productos: LISTA_PRODUCTOS, // Stale-While-Revalidate: arranca con datos locales
+  cargando: false,
+  ultimaActualizacion: 0,
+
+  fetchProductos: async (force = false) => {
+    const { ultimaActualizacion, cargando } = get();
+
+    // Evitamos peticiones concurrentes o re-fetch dentro del TTL, salvo que sea forzado
+    if (cargando || (!force && Date.now() - ultimaActualizacion < CACHE_TTL_MS)) return;
+
+    set({ cargando: true });
+
+    // AbortController real: cancela la petición (antes Promise.race la dejaba viva)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     try {
-      const fetchPromise = supabase
+      const { data, error } = await supabase
         .from('productos')
         .select('*')
-        .order('id', { ascending: true });
-
-      const result = await Promise.race([fetchPromise, timeout]);
-
-      if (!result || 'error' in result === false) {
-        console.warn("Timeout de conexion con Supabase, manteniendo catalogo local");
-        return; // Mantenemos LISTA_PRODUCTOS que ya está en el estado
-      }
-
-      const { data, error } = result as { data: Producto[] | null; error: unknown };
+        .order('id', { ascending: true })
+        .abortSignal(controller.signal);
 
       if (error || !data || data.length === 0) {
-        console.warn("Mantenemos catalogo local (fallback) debido a error o base de datos vacia");
-        set({ cargando: false });
-      } else {
-        // Solo actualizamos si Supabase tiene datos reales
-        set({ productos: data, ultimaActualizacion: Date.now(), cargando: false });
+        console.warn('Manteniendo catálogo local (fallback) por error, timeout o base de datos vacía');
+        return;
       }
+
+      set({ productos: data as Producto[], ultimaActualizacion: Date.now() });
     } catch (err) {
-      console.error("Error inesperado en fetch de productos, manteniendo fallback local:", err);
+      console.error('Error inesperado en fetch de productos, manteniendo fallback local:', err);
+    } finally {
+      clearTimeout(timer);
+      // Siempre se libera el flag, incluso en timeout (antes quedaba atascado en true)
       set({ cargando: false });
     }
   },
 
   agregarProductoStore: async (nuevoProd) => {
     try {
-      // 1. Insertar el producto base en Supabase
       const { data, error } = await supabase
         .from('productos')
         .insert({
@@ -74,23 +77,22 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
           descripcion_larga: nuevoProd.descripcion_larga,
           especificaciones: nuevoProd.especificaciones,
           marca: nuevoProd.marca,
-          stock: nuevoProd.stock
+          stock: nuevoProd.stock,
+          descuento: nuevoProd.descuento ?? 0,
         })
         .select()
         .single();
 
       if (error) throw error;
-      if (!data) throw new Error("No se pudo crear el producto en la base de datos.");
+      if (!data) throw new Error('No se pudo crear el producto en la base de datos.');
 
-      const creadorId = data.id;
-      let finalImgs: { id: number; url: string; orden: number }[] = [];
+      let finalImgs: ProductoImagen[] = [];
 
-      // 2. Si tiene imágenes adicionales, insertarlas
       if (nuevoProd.imagenes && nuevoProd.imagenes.length > 0) {
         const rowsToInsert = nuevoProd.imagenes.map((img, idx) => ({
-          producto_id: creadorId,
+          producto_id: data.id,
           url: img.url,
-          orden: img.orden ?? idx
+          orden: img.orden ?? idx,
         }));
 
         const { data: insertedImgs, error: imgError } = await supabase
@@ -99,24 +101,18 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
           .select('id, url, orden');
 
         if (imgError) {
-          console.warn("Fallo al guardar imágenes adicionales:", imgError.message);
+          console.warn('Fallo al guardar imágenes adicionales:', imgError.message);
         } else if (insertedImgs) {
-          finalImgs = insertedImgs;
+          finalImgs = insertedImgs as ProductoImagen[];
         }
       }
 
-      const productoCompleto: Producto = { ...data, imagenes: finalImgs };
-
-      // 3. Agregar al estado de Zustand
-      set((state) => ({
-        productos: [...state.productos, productoCompleto]
-      }));
-
+      const productoCompleto: Producto = { ...(data as Producto), imagenes: finalImgs };
+      set((state) => ({ productos: [...state.productos, productoCompleto] }));
       return productoCompleto;
     } catch (err) {
-      console.error("Error en agregarProductoStore:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg, { cause: err });
+      console.error('Error en agregarProductoStore:', err);
+      throw toError(err);
     }
   },
 
@@ -124,255 +120,233 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     try {
       const { imagenes, ...cambiosBase } = cambios;
 
-      // 1. Actualizar campos base de productos en Supabase
       if (Object.keys(cambiosBase).length > 0) {
-        const { error } = await supabase
-          .from('productos')
-          .update(cambiosBase)
-          .eq('id', id);
-
+        const { error } = await supabase.from('productos').update(cambiosBase).eq('id', id);
         if (error) throw error;
       }
 
-      // 2. Si se pasaron imágenes adicionales, reemplazarlas
-      if (imagenes !== undefined) {
-        const { error: delError } = await supabase
-          .from('producto_imagenes')
-          .delete()
-          .eq('producto_id', id);
+      let imagenesFinales: ProductoImagen[] | undefined;
 
-        if (delError) console.warn("Fallo al borrar imágenes adicionales antiguas:", delError.message);
+      if (imagenes !== undefined) {
+        // Reemplazo seguro: primero se insertan las nuevas y SOLO si funciona se borran las viejas.
+        // Así un fallo a mitad de camino nunca deja el producto sin imágenes.
+        const { data: previas, error: prevError } = await supabase
+          .from('producto_imagenes')
+          .select('id')
+          .eq('producto_id', id);
+        if (prevError) throw prevError;
+        const idsPrevios = (previas ?? []).map((r) => r.id as number);
 
         if (imagenes.length > 0) {
           const rowsToInsert = imagenes.map((img, idx) => ({
             producto_id: id,
             url: img.url,
-            orden: img.orden ?? idx
+            orden: img.orden ?? idx,
           }));
-
-          const { error: insError } = await supabase
+          const { data: nuevas, error: insError } = await supabase
             .from('producto_imagenes')
-            .insert(rowsToInsert);
+            .insert(rowsToInsert)
+            .select('id, url, orden');
+          if (insError) throw insError;
+          imagenesFinales = (nuevas ?? []) as ProductoImagen[];
+        } else {
+          imagenesFinales = [];
+        }
 
-          if (insError) console.warn("Fallo al insertar nuevas imágenes adicionales:", insError.message);
+        if (idsPrevios.length > 0) {
+          const { error: delError } = await supabase
+            .from('producto_imagenes')
+            .delete()
+            .in('id', idsPrevios);
+          if (delError) console.warn('Fallo al borrar imágenes antiguas:', delError.message);
         }
       }
 
-      // 3. Sincronizar en el estado de Zustand
       set((state) => ({
         productos: state.productos.map((p) =>
           p.id === id
-            ? { ...p, ...cambiosBase, ...(imagenes !== undefined ? { imagenes } : {}) }
+            ? { ...p, ...cambiosBase, ...(imagenesFinales !== undefined ? { imagenes: imagenesFinales } : {}) }
             : p
-        )
+        ),
       }));
     } catch (err) {
-      console.error("Error en actualizarProductoStore:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg, { cause: err });
+      console.error('Error en actualizarProductoStore:', err);
+      throw toError(err);
     }
   },
 
   eliminarProductoStore: async (id) => {
     try {
-      // 1. Borrar en la base de datos (Supabase tiene ON DELETE CASCADE en producto_imagenes y resenas)
-      const { error } = await supabase
-        .from('productos')
-        .delete()
-        .eq('id', id);
-
+      // ON DELETE CASCADE limpia producto_imagenes y resenas
+      const { error } = await supabase.from('productos').delete().eq('id', id);
       if (error) throw error;
-
-      // 2. Borrar del estado de Zustand
-      set((state) => ({
-        productos: state.productos.filter((p) => p.id !== id)
-      }));
+      set((state) => ({ productos: state.productos.filter((p) => p.id !== id) }));
     } catch (err) {
-      console.error("Error en eliminarProductoStore:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(msg, { cause: err });
+      console.error('Error en eliminarProductoStore:', err);
+      throw toError(err);
     }
   },
 
-  bulkUpdateStock: async (nuevoStock: number) => {
+  bulkUpdateStock: async (nuevoStock) => {
     try {
-      const { error } = await supabase
-        .from('productos')
-        .update({ stock: nuevoStock })
-        .gte('id', 0); // Todas las filas
-
+      const { error } = await supabase.from('productos').update({ stock: nuevoStock }).gte('id', 0);
       if (error) throw error;
-
-      set((state) => ({
-        productos: state.productos.map(p => ({ ...p, stock: nuevoStock }))
-      }));
+      set((state) => ({ productos: state.productos.map((p) => ({ ...p, stock: nuevoStock })) }));
     } catch (err) {
-      console.error("Error en bulkUpdateStock:", err);
-      throw err instanceof Error ? err : new Error(String(err));
+      console.error('Error en bulkUpdateStock:', err);
+      throw toError(err);
     }
   },
 
-  bulkCategoryDiscount: async (categoria: string, descuento: number) => {
+  bulkCategoryDiscount: async (categoria, descuento) => {
     try {
-      const { error } = await supabase
-        .from('productos')
-        .update({ descuento })
-        .eq('categoria', categoria);
-
+      const { error } = await supabase.from('productos').update({ descuento }).eq('categoria', categoria);
       if (error) throw error;
-
       set((state) => ({
-        productos: state.productos.map(p =>
-          p.categoria === categoria ? { ...p, descuento } : p
-        )
+        productos: state.productos.map((p) => (p.categoria === categoria ? { ...p, descuento } : p)),
       }));
     } catch (err) {
-      console.error("Error en bulkCategoryDiscount:", err);
-      throw err instanceof Error ? err : new Error(String(err));
+      console.error('Error en bulkCategoryDiscount:', err);
+      throw toError(err);
     }
-  }
+  },
 }));
-export function useProductos() {
-  const { 
-    productos, 
-    cargando, 
-    fetchProductos,
-    agregarProductoStore,
-    actualizarProductoStore,
-    eliminarProductoStore,
-    bulkUpdateStock,
-    bulkCategoryDiscount
-  } = useProductosStore();
 
-  useEffect(() => {
-    // Al montar el hook, intentamos un fetch si la caché está fría (más de 2 min)
-    fetchProductos();
-  }, [fetchProductos]);
+// ───────────────────────── Detalle de producto (fuera del hook: función pura y estable)
 
-  // Hook expuesto para forzar un refetch saltándose la caché
-  const refetchProductosForzado = useCallback(() => fetchProductos(true), [fetchProductos]);
+const DB_TIMEOUT_MS = 2500;
 
-  const fetchProductoById = useCallback(async (id: number) => {
-    // Definir un timeout de 2.5 segundos para la consulta de base de datos
-    const dbTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+type ResenaRow = {
+  id: number;
+  puntuacion: number;
+  comentario: string | null;
+  created_at: string;
+  user_id?: string | null;
+  profiles?: ResenaPerfil | ResenaPerfil[] | null;
+};
 
-    const fetchDataPromise = (async () => {
+const normalizarResena = (r: ResenaRow, perfil: ResenaPerfil | null): Resena => ({
+  id: r.id,
+  puntuacion: r.puntuacion,
+  comentario: r.comentario ?? '',
+  created_at: r.created_at,
+  profiles: perfil,
+});
+
+const conImagenLocal = (p: Producto): Producto => ({
+  ...p,
+  imagenes: [{ id: 0, url: p.imagen, orden: 0 }],
+});
+
+async function resenasSinJoin(id: number, signal: AbortSignal): Promise<Resena[]> {
+  const { data } = await supabase
+    .from('resenas')
+    .select('id, puntuacion, comentario, created_at, user_id')
+    .eq('producto_id', id)
+    .order('created_at', { ascending: false })
+    .abortSignal(signal);
+
+  const rows = (data ?? []) as ResenaRow[];
+  if (rows.length === 0) return [];
+
+  const userIds = [...new Set(rows.map((r) => r.user_id).filter((u): u is string => Boolean(u)))];
+  const perfiles = new Map<string, ResenaPerfil>();
+  if (userIds.length > 0) {
+    const { data: ps } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url')
+      .in('id', userIds)
+      .abortSignal(signal);
+    (ps ?? []).forEach((p) => perfiles.set(p.id as string, p as ResenaPerfil));
+  }
+
+  return rows.map((r) => normalizarResena(r, (r.user_id && perfiles.get(r.user_id)) || null));
+}
+
+export async function fetchProductoDetalle(id: number): Promise<{ producto: Producto | null; resenas: Resena[] }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DB_TIMEOUT_MS);
+  const localProd = LISTA_PRODUCTOS.find((p) => p.id === id);
+  const fallback = localProd ? conImagenLocal(localProd) : null;
+
+  try {
+    const [prodResult, imgsResult, resenasResult] = await Promise.all([
+      supabase.from('productos').select('*').eq('id', id).abortSignal(controller.signal).maybeSingle(),
+      supabase
+        .from('producto_imagenes')
+        .select('id, url, orden')
+        .eq('producto_id', id)
+        .order('orden', { ascending: true })
+        .abortSignal(controller.signal),
+      supabase
+        .from('resenas')
+        .select('id, puntuacion, comentario, created_at, user_id, profiles(username, avatar_url)')
+        .eq('producto_id', id)
+        .order('created_at', { ascending: false })
+        .abortSignal(controller.signal),
+    ]);
+
+    let producto: Producto | null;
+    if (prodResult.error || !prodResult.data) {
+      console.warn(`Producto #${id} no encontrado en Supabase o error:`, prodResult.error);
+      producto = fallback;
+    } else {
+      const base = prodResult.data as Producto;
+      const imgs = (imgsResult.data ?? []) as ProductoImagen[];
+      producto = { ...base, imagenes: imgs.length > 0 ? imgs : [{ id: 0, url: base.imagen, orden: 0 }] };
+    }
+
+    let resenas: Resena[] = [];
+    if (resenasResult.error) {
+      console.warn('Fallo al obtener reseñas con perfiles, intentando sin join:', resenasResult.error);
       try {
-        // Ejecutar consultas en paralelo para máxima velocidad
-        const [prodResult, imgsResult, resenasResult] = await Promise.all([
-          supabase.from('productos').select('*').eq('id', id).maybeSingle(),
-          supabase.from('producto_imagenes').select('id, url, orden').eq('producto_id', id).order('orden', { ascending: true }),
-          supabase.from('resenas').select(`
-            id,
-            puntuacion,
-            comentario,
-            created_at,
-            user_id,
-            profiles(username, avatar_url)
-          `).eq('producto_id', id).order('created_at', { ascending: false })
-        ]);
-
-        return { prodResult, imgsResult, resenasResult };
-      } catch (err) {
-        console.error("Error al consultar Supabase en paralelo:", err);
-        return null;
-      }
-    })();
-
-    const result = await Promise.race([fetchDataPromise, dbTimeout]);
-
-    let finalProducto: Producto | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let finalResenas: any[] = [];
-    const localProd = LISTA_PRODUCTOS.find(p => p.id === id);
-
-    if (!result) {
-      // Si hay timeout o error en red
-      console.warn(`Timeout al obtener producto #${id} desde Supabase. Usando catálogo local.`);
-      if (localProd) {
-        finalProducto = { ...localProd, imagenes: [{ id: 0, url: localProd.imagen, orden: 0 }] };
+        resenas = await resenasSinJoin(id, controller.signal);
+      } catch (e) {
+        console.error('Error definitivo al cargar reseñas fallback:', e);
       }
     } else {
-      const { prodResult, imgsResult, resenasResult } = result;
-
-      // 1. Procesar Producto
-      if (prodResult?.error || !prodResult?.data) {
-        console.warn(`Producto #${id} no encontrado en Supabase o error:`, prodResult?.error);
-        if (localProd) {
-          finalProducto = { ...localProd, imagenes: [{ id: 0, url: localProd.imagen, orden: 0 }] };
-        }
-      } else {
-        finalProducto = { 
-          ...prodResult.data, 
-          imagenes: (imgsResult?.data && imgsResult.data.length > 0) ? imgsResult.data : [{ id: 0, url: prodResult.data.imagen, orden: 0 }] 
-        };
-      }
-
-      // 2. Procesar Reseñas
-      if (resenasResult?.error) {
-        console.warn("Fallo al obtener reseñas con perfiles, intentando sin join:", resenasResult.error);
-        // Fallback: intentar obtener reseñas sin join
-        try {
-          const { data: resenasFallback } = await supabase
-            .from('resenas')
-            .select('id, puntuacion, comentario, created_at, user_id')
-            .eq('producto_id', id)
-            .order('created_at', { ascending: false });
-
-          if (resenasFallback && resenasFallback.length > 0) {
-            const userIds = resenasFallback.map(r => r.user_id).filter(Boolean);
-            const uniqueUserIds = [...new Set(userIds)];
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const profilesMap: Record<string, any> = {};
-
-            if (uniqueUserIds.length > 0) {
-              const { data: perfiles } = await supabase
-                .from('profiles')
-                .select('id, username, avatar_url')
-                .in('id', uniqueUserIds);
-              if (perfiles) {
-                perfiles.forEach(p => { profilesMap[p.id] = p; });
-              }
-            }
-
-            finalResenas = resenasFallback.map(r => ({
-              id: r.id,
-              puntuacion: r.puntuacion,
-              comentario: r.comentario,
-              created_at: r.created_at,
-              profiles: r.user_id && profilesMap[r.user_id] ? profilesMap[r.user_id] : null
-            }));
-          }
-        } catch (fallbackErr) {
-          console.error("Error definitivo al cargar reseñas fallback:", fallbackErr);
-        }
-      } else if (resenasResult?.data) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        finalResenas = resenasResult.data.map((r: any) => ({
-          id: r.id,
-          puntuacion: r.puntuacion,
-          comentario: r.comentario,
-          created_at: r.created_at,
-          profiles: Array.isArray(r.profiles) ? (r.profiles[0] || null) : (r.profiles || null)
-        }));
-      }
+      resenas = ((resenasResult.data ?? []) as unknown as ResenaRow[]).map((r) =>
+        normalizarResena(r, Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : (r.profiles ?? null))
+      );
     }
 
-    return {
-      producto: finalProducto,
-      resenas: finalResenas
-    };
-  }, []);
+    return { producto, resenas };
+  } catch (err) {
+    console.warn(`Timeout/error al obtener producto #${id} desde Supabase. Usando catálogo local.`, err);
+    return { producto: fallback, resenas: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-  return { 
-    productos, 
-    cargando, 
-    fetchProductoById, 
-    refetchProductos: refetchProductosForzado,
+// ───────────────────────── Hook público (misma API que antes, pero con selectores)
+
+export function useProductos() {
+  const productos = useProductosStore((s) => s.productos);
+  const cargando = useProductosStore((s) => s.cargando);
+  const fetchProductos = useProductosStore((s) => s.fetchProductos);
+  const agregarProductoStore = useProductosStore((s) => s.agregarProductoStore);
+  const actualizarProductoStore = useProductosStore((s) => s.actualizarProductoStore);
+  const eliminarProductoStore = useProductosStore((s) => s.eliminarProductoStore);
+  const bulkUpdateStock = useProductosStore((s) => s.bulkUpdateStock);
+  const bulkCategoryDiscount = useProductosStore((s) => s.bulkCategoryDiscount);
+
+  useEffect(() => {
+    // Respeta el TTL del store: no genera tráfico si la caché está fresca
+    void fetchProductos();
+  }, [fetchProductos]);
+
+  const refetchProductos = useCallback(() => fetchProductos(true), [fetchProductos]);
+
+  return {
+    productos,
+    cargando,
+    fetchProductoById: fetchProductoDetalle,
+    refetchProductos,
     agregarProductoStore,
     actualizarProductoStore,
     eliminarProductoStore,
     bulkUpdateStock,
-    bulkCategoryDiscount
+    bulkCategoryDiscount,
   };
 }

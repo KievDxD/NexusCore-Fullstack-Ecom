@@ -1,0 +1,10 @@
+# ==========================================
+# LOCAL AI CONTEXT & TOKEN OPTIMIZATION
+# NEVER COMMIT OR DEPLOY THESE FILES
+# ==========================================
+CODEBASE_SCHEMA.md
+AGENTS.md
+.agents/
+.gemini/
+mcp_config.json
+

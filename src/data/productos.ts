@@ -1,4 +1,4 @@
-import { type Producto } from '../hooks/useCarrito';
+import type { Producto } from '../types';
 
 export const LISTA_PRODUCTOS: Producto[] = [
   {

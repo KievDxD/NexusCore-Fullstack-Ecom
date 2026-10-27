@@ -1,11 +1,13 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { type User } from '@supabase/supabase-js'; // El tipo oficial de Supabase
 import { toast } from 'sonner';
 
+type Role = 'admin' | 'usuario';
+
 interface AuthContextType {
   user: User | null;
-  role: 'admin' | 'usuario' | null;
+  role: Role | null;
   username: string | null;
   avatarUrl: string | null;
   isAdmin: boolean;
@@ -20,92 +22,105 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const isRole = (value: unknown): value is Role => value === 'admin' || value === 'usuario';
+const avatarPorDefecto = (userId: string) => `https://api.dicebear.com/7.x/bottts/svg?seed=${userId}`;
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String((err as { message?: unknown } | null)?.message ?? err);
+
+// Códigos que indican que el servidor rechazó definitivamente la sesión (no un simple fallo de red)
+const SESSION_REJECTED_STATUS = [401, 403, 404];
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<'admin' | 'usuario' | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
-  const fetchProfile = async (userId: string, email?: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('role, username, avatar_url')
-        .eq('id', userId)
-        .single();
-      
-      if (error) {
-        console.warn("Error al obtener perfil, usando valores locales o por defecto:", error.message);
-        setRole(prev => prev || 'usuario');
-        setUsername(prev => prev || (email ? email.split('@')[0] : 'usuario'));
-        setAvatarUrl(prev => prev || `https://api.dicebear.com/7.x/bottts/svg?seed=${userId}`);
-      } else if (data) {
-        setRole(data.role as 'admin' | 'usuario');
-        setUsername(data.username);
-        setAvatarUrl(data.avatar_url);
+  // Evita cargas de perfil duplicadas para el mismo usuario (login + onAuthStateChange)
+  const profileInflight = useRef(new Map<string, Promise<void>>());
+
+  const limpiarPerfil = useCallback(() => {
+    setRole(null);
+    setUsername(null);
+    setAvatarUrl(null);
+  }, []);
+
+  const fetchProfile = useCallback((userId: string, email?: string): Promise<void> => {
+    const existente = profileInflight.current.get(userId);
+    if (existente) return existente;
+
+    const tarea = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role, username, avatar_url')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (error || !data) {
+          if (error) console.warn('Error al obtener perfil, usando valores por defecto:', error.message);
+          setRole((prev) => prev || 'usuario');
+          setUsername((prev) => prev || (email ? email.split('@')[0] : 'usuario'));
+          setAvatarUrl((prev) => prev || avatarPorDefecto(userId));
+        } else {
+          setRole(isRole(data.role) ? data.role : 'usuario');
+          setUsername(data.username);
+          setAvatarUrl(data.avatar_url);
+        }
+      } catch (err) {
+        console.error('Error inesperado al cargar perfil:', err);
+        setRole((prev) => prev || 'usuario');
+      } finally {
+        profileInflight.current.delete(userId);
       }
-    } catch (err) {
-      console.error("Error inesperado al cargar perfil:", err);
-      setRole(prev => prev || 'usuario');
-    }
-  };
+    })();
+
+    profileInflight.current.set(userId, tarea);
+    return tarea;
+  }, []);
 
   useEffect(() => {
     let active = true;
 
-    // Escuchar cambios de autenticación y cargar sesión inicial de manera segura
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log(`onAuthStateChange event: ${event}`, session);
+    // IMPORTANTE: el callback de onAuthStateChange NO debe hacer `await` de llamadas al cliente de
+    // Supabase (riesgo de deadlock). Se actualiza el estado de forma síncrona y el trabajo de red se difiere.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
 
       const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      setCargando(false);
 
-      if (currentUser) {
-        // Carga optimista: Asumir que la sesión local es válida para renderizar inmediatamente la UI
-        setUser(currentUser);
-        if (active) setCargando(false);
+      if (!currentUser) {
+        limpiarPerfil();
+        return;
+      }
 
-        // Verificar la sesión real contra el servidor en segundo plano
-        const { data: { user: verifiedUser }, error } = await supabase.auth.getUser();
-        
-        if (error || !verifiedUser) {
-          console.warn("Sesión inválida o usuario eliminado del servidor. Limpiando sesión local:", error?.message);
-          try {
-            await supabase.auth.signOut({ scope: 'local' });
-          } catch (e) {
-            console.warn("Fallo al ejecutar signOut local:", e);
+      // Un refresco de token no cambia el perfil
+      if (event === 'TOKEN_REFRESHED') return;
+
+      setTimeout(async () => {
+        if (!active) return;
+
+        // Al restaurar sesión, validar contra el servidor sin cerrar sesión ante simples fallos de red
+        if (event === 'INITIAL_SESSION') {
+          const { error } = await supabase.auth.getUser();
+          if (!active) return;
+          if (error && 'status' in error && typeof error.status === 'number' && SESSION_REJECTED_STATUS.includes(error.status)) {
+            console.warn('Sesión inválida o usuario eliminado del servidor. Cerrando sesión local:', error.message);
+            await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+            return; // SIGNED_OUT limpiará el estado
           }
-          setUser(null);
-          setRole(null);
-          setUsername(null);
-          setAvatarUrl(null);
-          // Snapshot estático de claves para evitar desync de índices al borrar
-          Object.keys(localStorage)
-            .filter(key => key.startsWith('sb-') || key.includes('supabase.auth'))
-            .forEach(key => localStorage.removeItem(key));
-          return;
         }
 
-        // Si es válido, actualizar el usuario y cargar su perfil público en background
-        setUser(verifiedUser);
-        await fetchProfile(verifiedUser.id, verifiedUser.email);
-      } else {
-        // Si no hay sesión, limpiar estados
-        setUser(null);
-        setRole(null);
-        setUsername(null);
-        setAvatarUrl(null);
-        if (active) setCargando(false);
-      }
+        await fetchProfile(currentUser.id, currentUser.email);
+      }, 0);
     });
 
-    // Salvaguarda para evitar pantallas de carga infinitas
+    // Salvaguarda contra pantallas de carga infinitas (forma funcional: sin closure obsoleto)
     const timeoutId = setTimeout(() => {
-      if (active && cargando) {
-        console.warn("Tiempo de espera de inicialización agotado. Desactivando cargando.");
-        setCargando(false);
-      }
+      if (active) setCargando(false);
     }, 4500);
 
     return () => {
@@ -113,10 +128,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
       clearTimeout(timeoutId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchProfile, limpiarPerfil]);
 
-  const login = async (emailOrUsername: string, pass: string) => {
+  const login = useCallback(async (emailOrUsername: string, pass: string) => {
     let identifier = emailOrUsername.trim();
     // Quitar @ si el usuario lo ingresó al inicio del username
     if (identifier.startsWith('@')) {
@@ -127,11 +141,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Si no contiene un '@', asumimos que es un username y buscamos su email
     if (!identifier.includes('@')) {
       const { data: email, error: rpcError } = await supabase.rpc('get_email_by_username', {
-        username_to_find: identifier
+        username_to_find: identifier,
       });
 
       if (rpcError) {
-        console.error("Error al resolver username por RPC:", rpcError.message);
+        console.error('Error al resolver username por RPC:', rpcError.message);
       }
 
       if (!email) {
@@ -148,11 +162,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
     setUser(data.user);
     if (data.user) {
+      // Comparte la promesa en curso con onAuthStateChange: una sola consulta
       await fetchProfile(data.user.id, data.user.email);
     }
-  };
+  }, [fetchProfile]);
 
-  const registro = async (email: string, pass: string, usernameStr: string) => {
+  const registro = useCallback(async (email: string, pass: string, usernameStr: string) => {
     const cleanUsername = usernameStr.trim();
     const cleanEmail = email.trim().toLowerCase();
 
@@ -171,13 +186,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 1. Pre-validar en base de datos usando la RPC unificada
     const { data: checkData, error: checkError } = await supabase.rpc('check_user_exists', {
       email_to_check: cleanEmail,
-      username_to_check: cleanUsername
+      username_to_check: cleanUsername,
     });
 
     if (checkError) {
-      console.warn("Fallo al pre-validar credenciales en base de datos:", checkError.message);
+      console.warn('Fallo al pre-validar credenciales en base de datos:', checkError.message);
     } else if (checkData && checkData.length > 0) {
-      const { email_exists, username_exists } = checkData[0] as { email_exists: boolean, username_exists: boolean };
+      const { email_exists, username_exists } = checkData[0] as { email_exists: boolean; username_exists: boolean };
       if (email_exists) {
         throw new Error(`El correo electrónico "${cleanEmail}" ya está registrado.`);
       }
@@ -187,51 +202,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // 2. Ejecutar registro de Supabase con manejo explícito de errores
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: pass,
-        options: {
-          data: { username: cleanUsername },
-          emailRedirectTo: window.location.origin
-        }
-      });
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password: pass,
+      options: {
+        data: { username: cleanUsername },
+        emailRedirectTo: window.location.origin,
+      },
+    });
 
-      if (error) {
-        // Capturar errores conocidos de Supabase y mostrarlos con toast
-        if (error.message.includes('User already registered')) {
-          toast.error('Este correo ya está registrado. Intenta iniciar sesión.');
-        } else if (error.message.includes('Password should be at least 6 characters')) {
-          toast.error('La contraseña debe tener al menos 6 caracteres.');
-        } else {
-          toast.error(error.message || 'Error al crear la cuenta.');
-        }
-        throw error;
+    if (error) {
+      if (error.message.includes('User already registered')) {
+        toast.error('Este correo ya está registrado. Intenta iniciar sesión.');
+      } else if (error.message.includes('Password should be at least 6 characters')) {
+        toast.error('La contraseña debe tener al menos 6 caracteres.');
+      } else {
+        toast.error(error.message || 'Error al crear la cuenta.');
       }
-
-      // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
-      if (data.session && data.user) {
-        setUser(data.user);
-        // Garantizar que la UI se actualice inmediatamente con los datos locales de registro
-        setRole('usuario');
-        setUsername(cleanUsername);
-        setAvatarUrl(`https://api.dicebear.com/7.x/bottts/svg?seed=${data.user.id}`);
-
-        // Sincronizar el perfil real desde la base de datos (creado por el trigger)
-        await fetchProfile(data.user.id, data.user.email);
-        return true;
-      }
-
-      return false; // Requiere confirmación de correo
-    } catch (err) {
-      // Re-throw si ya es un Error procesado arriba
-      if (err instanceof Error) throw err;
-      toast.error('Error inesperado durante el registro.');
-      throw new Error('Error inesperado durante el registro.');
+      throw error;
     }
-  };
 
-  const actualizarUsername = async (nuevoUsername: string) => {
+    // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
+    if (data.session && data.user) {
+      setUser(data.user);
+      setRole('usuario');
+      setUsername(cleanUsername);
+      setAvatarUrl(avatarPorDefecto(data.user.id));
+
+      // Sincronizar el perfil real desde la base de datos (creado por el trigger)
+      await fetchProfile(data.user.id, data.user.email);
+      return true;
+    }
+
+    return false; // Requiere confirmación de correo
+  }, [fetchProfile]);
+
+  // Se usa UPDATE (no upsert) y NUNCA se envían role/email desde el cliente:
+  // el perfil lo crea el trigger handle_new_user y el rol solo lo puede cambiar un administrador de BD.
+  const actualizarUsername = useCallback(async (nuevoUsername: string) => {
     if (!user) throw new Error('No hay sesión activa.');
     const cleanUsername = nuevoUsername.trim();
 
@@ -240,8 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      // 1. Verificar si el username ya está en uso por OTRO usuario
-      // Optimizacion: Si solo esta cambiando mayusculas/minusculas, no hacer el select
+      // Si solo cambian mayúsculas/minúsculas no hace falta comprobar duplicados
       if (cleanUsername.toLowerCase() !== username?.toLowerCase()) {
         const { data: existente } = await supabase
           .from('profiles')
@@ -255,120 +262,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 2. Hacer upsert del perfil completo
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          username: cleanUsername,
-          email: user.email,
-          role: role || 'usuario',
-          avatar_url: avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.id}`
-        });
-
+      const { error } = await supabase.from('profiles').update({ username: cleanUsername }).eq('id', user.id);
       if (error) throw error;
 
-      // 3. Sincronizar estado local inmediatamente
       setUsername(cleanUsername);
     } catch (err) {
-      console.error("Error al actualizar username:", err);
-      const errorMsg = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || String(err);
-      throw new Error(String(errorMsg), { cause: err });
+      console.error('Error al actualizar username:', err);
+      throw new Error(errorMessage(err), { cause: err });
     }
-  };
+  }, [user, username]);
 
-  const actualizarAvatar = async (nuevoAvatarUrl: string) => {
+  const actualizarAvatar = useCallback(async (nuevoAvatarUrl: string) => {
     if (!user) throw new Error('No hay sesión activa.');
 
     try {
-      // Usar upsert para garantizar creación de perfil si no existe
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          id: user.id,
-          username: username || user.email?.split('@')[0] || 'usuario',
-          email: user.email,
-          role: role || 'usuario',
-          avatar_url: nuevoAvatarUrl
-        });
-
+      const { error } = await supabase.from('profiles').update({ avatar_url: nuevoAvatarUrl }).eq('id', user.id);
       if (error) throw error;
       setAvatarUrl(nuevoAvatarUrl);
     } catch (err) {
-      console.error("Error al actualizar avatar:", err);
-      const errorMsg = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || String(err);
-      throw new Error(String(errorMsg), { cause: err });
+      console.error('Error al actualizar avatar:', err);
+      throw new Error(errorMessage(err), { cause: err });
     }
-  };
+  }, [user]);
 
-  const subirAvatar = async (file: File): Promise<string> => {
+  const subirAvatar = useCallback(async (file: File): Promise<string> => {
     if (!user) throw new Error('No hay sesión activa.');
 
     try {
       const fileExt = file.name.split('.').pop() || 'jpg';
       const filePath = `${user.id}/avatar-${Date.now()}.${fileExt}`;
 
-      // Subir archivo al bucket de avatars
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
+        .upload(filePath, file, { cacheControl: '3600', upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Obtener la URL pública del archivo
-      const { data } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
       const publicUrl = data.publicUrl;
 
-      // Actualizar la base de datos con la nueva URL
       await actualizarAvatar(publicUrl);
-
       return publicUrl;
     } catch (err) {
-      console.error("Error al subir avatar:", err);
-      const error = err instanceof Error ? err : new Error(String(err));
-      throw new Error(error.message || 'Error inesperado al subir la imagen.', { cause: err });
+      console.error('Error al subir avatar:', err);
+      throw new Error(errorMessage(err) || 'Error inesperado al subir la imagen.', { cause: err });
     }
-  };
+  }, [user, actualizarAvatar]);
 
-  const logout = async () => {
-    // 1. Limpiar estados locales de React de forma síncrona INMEDIATAMENTE
+  const logout = useCallback(async () => {
+    // Limpieza síncrona de la UI
     setUser(null);
-    setRole(null);
-    setUsername(null);
-    setAvatarUrl(null);
+    limpiarPerfil();
 
-    // 2. Purga segura de localStorage con snapshot estático de claves
+    // Cierra solo ESTE dispositivo (antes 'global' cerraba sesión en todos sin avisar).
+    // signOut ya elimina la sesión persistida: no hace falta purgar localStorage a mano.
     try {
-      Object.keys(localStorage)
-        .filter(key => key.startsWith('sb-') || key.includes('supabase.auth'))
-        .forEach(key => localStorage.removeItem(key));
+      await supabase.auth.signOut({ scope: 'local' });
     } catch (e) {
-      console.warn("No se pudo limpiar localStorage manualmente:", e);
+      console.warn('Fallo en signOut:', e);
     }
-
-    // 3. Cerrar sesión GLOBAL (servidor + cliente) en una sola llamada
-    try {
-      await supabase.auth.signOut({ scope: 'global' });
-    } catch (e) {
-      console.warn("Fallo en signOut global:", e);
-    }
-
-    // onAuthStateChange detectará el SIGNED_OUT y redirigirá naturalmente.
-    // NO usamos window.location.href = '/login' para evitar un reload innecesario.
-  };
+  }, [limpiarPerfil]);
 
   const isAdmin = role === 'admin';
 
+  // value memoizado: los consumidores solo se re-renderizan si algo realmente cambió
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user, role, username, avatarUrl, isAdmin,
+      login, registro, actualizarUsername, actualizarAvatar, subirAvatar, logout, cargando,
+    }),
+    [user, role, username, avatarUrl, isAdmin, login, registro, actualizarUsername, actualizarAvatar, subirAvatar, logout, cargando]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, role, username, avatarUrl, isAdmin, login, registro, actualizarUsername, actualizarAvatar, subirAvatar, logout, cargando }}>
+    <AuthContext.Provider value={value}>
       {cargando ? (
-        <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white z-999">
+        <div className="fixed inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white z-[999]">
           <div className="w-12 h-12 border-4 border-t-indigo-500 border-zinc-800 rounded-full animate-spin mb-4"></div>
           <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest animate-pulse">Iniciando NEXUS // CORE...</p>
         </div>

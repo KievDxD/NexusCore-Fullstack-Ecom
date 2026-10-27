@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProductos } from '../hooks/useProductos';
-import { useCarrito, type Producto } from '../hooks/useCarrito';
+import { useCarritoStore } from '../hooks/useCarrito';
+import type { Producto } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { convertPrice, formatCurrency } from '../utils/currency';
+import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
 import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import AdminProductoModal from '../components/AdminProductoModal';
@@ -26,8 +27,9 @@ export default function PaginaProducto() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { fetchProductoById } = useProductos();
-  const { agregarProducto } = useCarrito();
-  const { currency, rates } = useSettings();
+  const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+  const currency = useSettings((s) => s.currency);
+  const rates = useSettings((s) => s.rates);
   const { user, username, avatarUrl, isAdmin } = useAuth();
 
   const [producto, setProducto] = useState<Producto | null>(null);
@@ -105,8 +107,7 @@ export default function PaginaProducto() {
         setResenas(res.resenas || []);
         // Inicializar la imagen activa de forma segura
         const validImgs = res.producto.imagenes && res.producto.imagenes.length > 0
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? res.producto.imagenes.map((img: any) => img.url).filter(Boolean)
+          ? res.producto.imagenes.map((img) => img.url).filter(Boolean)
           : [];
         const defaultImg = validImgs.length > 0 ? validImgs[0] : (res.producto.imagen || '');
         setImagenActiva(defaultImg);
@@ -169,7 +170,7 @@ export default function PaginaProducto() {
   const tieneDescuento = (producto.descuento ?? 0) > 0;
   const precioOriginal = convertPrice(producto.precio, currency, rates);
   const precioFinal = tieneDescuento 
-    ? convertPrice(producto.precio * (1 - (producto.descuento ?? 0) / 100), currency, rates)
+    ? convertPrice(precioConDescuento(producto), currency, rates)
     : precioOriginal;
 
   const precioOriginalFormateado = formatCurrency(precioOriginal, currency);

@@ -52,6 +52,10 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(16px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        gradient: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.4s ease-out both',
@@ -62,6 +66,7 @@ export default {
         'backdrop-in': 'backdrop-in 0.3s ease-out both',
         'backdrop-out': 'backdrop-out 0.2s ease-in both',
         'slide-up': 'slide-up 0.35s ease-out both',
+        gradient: 'gradient 4s ease infinite',
       },
     },
   },

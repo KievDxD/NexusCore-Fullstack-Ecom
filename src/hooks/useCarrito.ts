@@ -1,38 +1,21 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useProductosStore } from './useProductos';
+import { precioConDescuento } from '../utils/currency';
+import type { CartItem, CartItemPersisted, Producto } from '../types';
 
-// 1. Estructura exacta de lo que viene de la base de datos (Supabase)
-export interface Producto {
-  id: number;
-  nombre: string;
-  precio: number;
-  imagen: string;
-  categoria: string;
-  descripcion: string;
-  stock: number;
-  descuento?: number;
-  descripcion_larga?: string;
-  especificaciones?: Record<string, string>;
-  marca?: string;
-  imagenes?: { id: number; url: string; orden: number }[];
-}
+// Re-exports de compatibilidad: los tipos ahora viven en src/types
+export type { Producto, CartItem, CartItemPersisted } from '../types';
 
-// 2. Un CartItem es un Producto, pero con la propiedad extra de "cantidad"
-export interface CartItem extends Producto {
-  cantidad: number;
-}
-
-export interface CartItemPersisted {
-  id: number;
-  cantidad: number;
-}
+const STOCK_POR_DEFECTO = 10;
 
 interface CarritoState {
   items: CartItemPersisted[];
   agregarProducto: (producto: Producto, cantidad?: number) => void;
   eliminarProducto: (id: number) => void;
   limpiarCarrito: () => void;
+  sincronizarConCatalogo: (catalogo: Producto[]) => void;
 }
 
 export const useCarritoStore = create<CarritoState>()(
@@ -40,84 +23,113 @@ export const useCarritoStore = create<CarritoState>()(
     (set) => ({
       items: [],
 
-      agregarProducto: (producto, cantidad = 1) => set((state) => {
-        // Obtenemos el stock más fresco desde useProductosStore
-        const productosGlobal = useProductosStore.getState().productos;
-        const productoFresco = productosGlobal.find(p => p.id === producto.id) || producto;
-        
-        const existe = state.items.find((item) => item.id === producto.id);
-        const stock = productoFresco.stock ?? 10;
-        const cantidadActual = existe ? existe.cantidad : 0;
-        const nuevaCantidad = cantidadActual + cantidad;
+      agregarProducto: (producto, cantidad = 1) =>
+        set((state) => {
+          if (cantidad <= 0) return state;
 
-        if (nuevaCantidad > stock) {
-          // Si supera el stock, limitamos a la cantidad máxima disponible
-          const cantPermitida = stock - cantidadActual;
-          if (cantPermitida <= 0) {
-            return state;
-          }
-          if (existe) {
-            return {
-              items: state.items.map((item) =>
-                item.id === producto.id ? { id: item.id, cantidad: stock } : item
-              ),
-            };
-          }
-          return { items: [...state.items, { id: producto.id, cantidad: stock }] };
-        }
+          // Stock más fresco desde el catálogo global
+          const fresco = useProductosStore.getState().productos.find((p) => p.id === producto.id) ?? producto;
+          const stock = fresco.stock ?? STOCK_POR_DEFECTO;
 
-        if (existe) {
+          const actual = state.items.find((i) => i.id === producto.id);
+          const cantidadActual = actual?.cantidad ?? 0;
+          // Nunca superar el stock disponible
+          const nuevaCantidad = Math.min(cantidadActual + cantidad, stock);
+
+          if (nuevaCantidad <= cantidadActual) return state; // sin stock restante: no cambia nada
+
           return {
-            items: state.items.map((item) =>
-              item.id === producto.id ? { id: item.id, cantidad: nuevaCantidad } : item
-            ),
+            items: actual
+              ? state.items.map((i) => (i.id === producto.id ? { id: i.id, cantidad: nuevaCantidad } : i))
+              : [...state.items, { id: producto.id, cantidad: nuevaCantidad }],
           };
-        }
-        return { items: [...state.items, { id: producto.id, cantidad }] };
-      }),
+        }),
 
-      eliminarProducto: (id) => set((state) => ({
-        items: state.items.filter((item) => item.id !== id),
-      })),
+      eliminarProducto: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
 
       limpiarCarrito: () => set({ items: [] }),
+
+      // Elimina productos que ya no existen / sin stock y ajusta cantidades al stock real.
+      // Se ejecuta solo con un catálogo real de Supabase (ver suscripción al final del archivo).
+      sincronizarConCatalogo: (catalogo) =>
+        set((state) => {
+          const porId = new Map(catalogo.map((p) => [p.id, p]));
+          let cambio = false;
+          const items: CartItemPersisted[] = [];
+
+          for (const item of state.items) {
+            const prod = porId.get(item.id);
+            const stock = prod ? (prod.stock ?? STOCK_POR_DEFECTO) : 0;
+            if (!prod || stock <= 0) {
+              cambio = true;
+              continue;
+            }
+            const cantidad = Math.min(item.cantidad, stock);
+            if (cantidad !== item.cantidad) cambio = true;
+            items.push({ id: item.id, cantidad });
+          }
+
+          return cambio ? { items } : state;
+        }),
     }),
     {
-      name: 'carrito-storage', // Guarda el carrito en el navegador
+      name: 'carrito-storage',
       partialize: (state) => ({ items: state.items }),
     }
   )
 );
 
-// Custom hook que cruza los items persistidos con el catálogo fresco de Supabase
+// Cuando llega el catálogo real, depuramos el carrito persistido
+useProductosStore.subscribe((state, prev) => {
+  if (state.productos === prev.productos || state.ultimaActualizacion === 0) return;
+  useCarritoStore.getState().sincronizarConCatalogo(state.productos);
+});
+
+const placeholderPendiente = (item: CartItemPersisted): CartItem => ({
+  id: item.id,
+  nombre: 'Cargando producto...',
+  precio: 0,
+  imagen: 'https://placehold.co/600x400/1e293b/475569?text=Cargando...',
+  categoria: '',
+  descripcion: '',
+  stock: 0,
+  cantidad: item.cantidad,
+  pendiente: true,
+});
+
+/** Total de unidades en el carrito (primitivo: el Navbar solo re-renderiza si cambia el número). */
+export const useCarritoCount = () =>
+  useCarritoStore((s) => s.items.reduce((sum, i) => sum + i.cantidad, 0));
+
+/** Solo las acciones: componentes como TarjetaProducto no se re-renderizan al cambiar el carrito. */
+export const useCarritoActions = () => {
+  const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+  const eliminarProducto = useCarritoStore((s) => s.eliminarProducto);
+  const limpiarCarrito = useCarritoStore((s) => s.limpiarCarrito);
+  return { agregarProducto, eliminarProducto, limpiarCarrito };
+};
+
+/** Cruza los items persistidos con el catálogo fresco. Memoizado y con lookup O(1). */
 export function useCarrito() {
-  const store = useCarritoStore();
-  const productosGlobal = useProductosStore(state => state.productos);
+  const itemsPersistidos = useCarritoStore((s) => s.items);
+  const productos = useProductosStore((s) => s.productos);
+  const { agregarProducto, eliminarProducto, limpiarCarrito } = useCarritoActions();
 
-  const itemsCompletos: CartItem[] = store.items.map(item => {
-    // Buscar el producto en el catálogo actualizado
-    const prodFresco = productosGlobal.find(p => p.id === item.id);
-    
-    // Si lo encuentra, inyectar el precio y stock actual. 
-    if (prodFresco) {
-      // Usamos el stock fresco para limitar la cantidad si el stock bajó en el backend
-      const stockDisponible = prodFresco.stock ?? 10;
-      const cantidadSegura = Math.min(item.cantidad, stockDisponible);
-      return { ...prodFresco, cantidad: cantidadSegura };
-    }
-    
-    // Fallback temporal si el catálogo no ha cargado
-    return {
-      id: item.id,
-      nombre: 'Cargando producto...',
-      precio: 0,
-      imagen: 'https://placehold.co/600x400/1e293b/475569?text=Cargando...',
-      categoria: '',
-      descripcion: '',
-      stock: 0,
-      cantidad: item.cantidad
-    } as CartItem;
-  });
+  const items = useMemo<CartItem[]>(() => {
+    const porId = new Map(productos.map((p) => [p.id, p]));
+    return itemsPersistidos.map((item) => {
+      const prod = porId.get(item.id);
+      if (!prod) return placeholderPendiente(item);
+      const stock = prod.stock ?? STOCK_POR_DEFECTO;
+      return { ...prod, cantidad: Math.min(item.cantidad, stock) };
+    });
+  }, [itemsPersistidos, productos]);
 
-  return { ...store, items: itemsCompletos };
+  const total = useMemo(
+    () => items.reduce((sum, i) => sum + precioConDescuento(i) * i.cantidad, 0),
+    [items]
+  );
+  const hayPendientes = useMemo(() => items.some((i) => i.pendiente), [items]);
+
+  return { items, total, hayPendientes, agregarProducto, eliminarProducto, limpiarCarrito };
 }

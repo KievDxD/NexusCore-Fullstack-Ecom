@@ -1,38 +1,53 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Vite usa import.meta.env para leer las variables del archivo .env
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-project.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+if (!envUrl || !envKey) {
+  // En producción un build sin credenciales es un error de despliegue: fallar de forma explícita
+  if (import.meta.env.PROD) {
+    throw new Error('Faltan VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY en el entorno de build.');
+  }
   console.warn('Faltan las variables de entorno de Supabase en el archivo .env. Usando credenciales demo.');
 }
 
+const supabaseUrl = envUrl || 'https://placeholder-project.supabase.co';
+const supabaseAnonKey = envKey || 'placeholder-anon-key';
+
+const FETCH_TIMEOUT_MS = 7000;
+
+// fetch con timeout global que RESPETA la señal de cancelación del llamador
+// (antes la sobrescribía, haciendo inútil cualquier AbortController externo).
+const fetchWithTimeout: typeof fetch = async (input, init) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  const externalSignal = init?.signal;
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError' && !externalSignal?.aborted) {
+      throw new Error('Tiempo de espera agotado al conectar con el servidor.', { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+};
+
 // Este es tu "puente" oficial hacia la base de datos
-// Configuramos un timeout global de fetch para evitar que las peticiones se queden "colgadas"
-// indefinidamente si el backend de Supabase está pausado o inaccesible.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
   },
-  global: {
-    fetch: async (url, options) => {
-      const controller = new AbortController();
-      // Timeout de 7 segundos
-      const timeoutId = setTimeout(() => controller.abort(), 7000); 
-      try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(timeoutId);
-        return response;
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          console.warn(`Timeout en Supabase (7s) para la petición: ${url}`);
-          throw new Error('Tiempo de espera agotado al conectar con el servidor.');
-        }
-        throw error;
-      }
-    }
-  }
+  global: { fetch: fetchWithTimeout },
 });

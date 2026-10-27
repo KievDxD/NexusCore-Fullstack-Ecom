@@ -1,23 +1,29 @@
 import { useState, memo } from "react";
 import { Link } from "react-router-dom";
-import { useCarrito, type Producto } from "../hooks/useCarrito"; 
-import { useSettings } from "../hooks/useSettings"; 
-import { convertPrice, formatCurrency } from "../utils/currency";
+import { useCarritoStore } from "../hooks/useCarrito";
+import { useSettings } from "../hooks/useSettings";
+import { convertPrice, formatCurrency, precioConDescuento } from "../utils/currency";
 import "./TarjetaProducto.css";
 import { toast } from "sonner";
-import { useAuth } from "../context/AuthContext";
+import type { Producto } from "../types";
 import { Pencil } from "lucide-react";
-import AdminProductoModal from "./AdminProductoModal";
 
-export default memo(function TarjetaProducto({ producto }: { producto: Producto }) {
-  const { agregarProducto } = useCarrito();
-  const { currency, rates } = useSettings();
-  const { isAdmin } = useAuth();
+interface TarjetaProductoProps {
+  producto: Producto;
+  isAdmin?: boolean;
+  onEditar?: (producto: Producto) => void;
+}
+
+export default memo(function TarjetaProducto({ producto, isAdmin = false, onEditar }: TarjetaProductoProps) {
+  // Selectores granulares: la tarjeta no se re-renderiza cuando cambia el contenido del carrito
+  const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+  const currency = useSettings((s) => s.currency);
+  const rates = useSettings((s) => s.rates);
 
   const tieneDescuento = (producto.descuento ?? 0) > 0;
   const precioOriginal = convertPrice(producto.precio, currency, rates);
   const precioFinal = tieneDescuento 
-    ? convertPrice(producto.precio * (1 - (producto.descuento ?? 0) / 100), currency, rates)
+    ? convertPrice(precioConDescuento(producto), currency, rates)
     : precioOriginal;
     
   const precioOriginalFormateado = formatCurrency(precioOriginal, currency);
@@ -26,7 +32,6 @@ export default memo(function TarjetaProducto({ producto }: { producto: Producto 
   const [cantidad, setCantidad] = useState(1);
   const [estaAgregando, setEstaAgregando] = useState(false);
   const [animarNumero, setAnimarNumero] = useState(false);
-  const [modalEditOpen, setModalEditOpen] = useState(false);
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
@@ -77,7 +82,7 @@ export default memo(function TarjetaProducto({ producto }: { producto: Producto 
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setModalEditOpen(true);
+              onEditar?.(producto);
             }}
             className="absolute top-3 right-3 bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl z-10 shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
             title="Editar Hardware"
@@ -193,13 +198,6 @@ export default memo(function TarjetaProducto({ producto }: { producto: Producto 
         </button>
       </div>
       </div>
-      
-      {/* Modal de edición */}
-      <AdminProductoModal 
-        isOpen={modalEditOpen} 
-        onClose={() => setModalEditOpen(false)} 
-        productoAEditar={producto} 
-      />
     </>
   );
 });

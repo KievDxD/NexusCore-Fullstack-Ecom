@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Plus, Trash2, Loader2, Save, AlertTriangle, ImagePlus, Cpu, Tag, DollarSign, Package, FileText, Image as ImageIcon, Percent } from 'lucide-react';
 import { toast } from 'sonner';
-import { type Producto } from '../hooks/useCarrito';
+import type { Producto } from '../types';
 import { useProductos } from '../hooks/useProductos';
 
 interface AdminProductoModalProps {
