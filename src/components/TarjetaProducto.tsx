@@ -7,7 +7,7 @@ import { getDiscountBadgeStyle } from "../utils/discount";
 import "./TarjetaProducto.css";
 import { toast } from "sonner";
 import type { Producto } from "../types";
-import { Pencil } from "lucide-react";
+import { Pencil, Cpu } from "lucide-react";
 
 interface TarjetaProductoProps {
   producto: Producto;
@@ -35,6 +35,11 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   const [cantidad, setCantidad] = useState(1);
   const [estaAgregando, setEstaAgregando] = useState(false);
   const [animarNumero, setAnimarNumero] = useState(false);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const [errorSrc, setErrorSrc] = useState<string | null>(null);
+
+  const imgCargada = Boolean(producto.imagen) && loadedSrc === producto.imagen;
+  const imgConError = !producto.imagen || errorSrc === producto.imagen;
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
@@ -50,14 +55,30 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   };
 
   const aumentar = () => {
+    if (bloqueado) {
+      toast.warning(MENSAJE_LIMITE_STOCK, {
+        description: `Ya tienes las ${stockDisponible} unidades disponibles en tu carrito.`,
+      });
+      return;
+    }
     if (cantidadVisible < restante) {
-      setCantidad(cantidadVisible + 1);
+      const nuevaCant = cantidadVisible + 1;
+      setCantidad(nuevaCant);
       dispararAnimacionNumero();
+      if (nuevaCant >= restante) {
+        toast.warning("Límite de stock alcanzado", {
+          description:
+            enCarrito > 0
+              ? `${MENSAJE_LIMITE_STOCK} (${enCarrito} en carrito + ${nuevaCant} seleccionada(s) = ${stockDisponible} máx).`
+              : `${MENSAJE_LIMITE_STOCK} (${stockDisponible} unidades disponibles).`,
+        });
+      }
     } else {
       toast.warning("Límite de stock", {
-        description: enCarrito > 0
-          ? `Ya tienes ${enCarrito} en el carrito. Solo puedes añadir ${restante} más.`
-          : `Solo hay ${stockDisponible} unidades disponibles.`,
+        description:
+          enCarrito > 0
+            ? `${MENSAJE_LIMITE_STOCK}. Ya tienes ${enCarrito} en el carrito y ${cantidadVisible} seleccionada(s).`
+            : `Solo hay ${stockDisponible} unidades disponibles.`,
       });
     }
   };
@@ -77,14 +98,18 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
       return;
     }
 
+    const llegaraAlLimite = enCarrito + cantidadVisible >= stockDisponible;
+
     if (!agregarProducto(producto, cantidadVisible)) {
       toast.info(MENSAJE_LIMITE_STOCK);
       return;
     }
 
     toast.success(`Añadido: ${cantidadVisible}x ${producto.nombre} al carrito`, {
-      description: "¡Listo para cotizar en tu carrito!",
-      duration: 2000,
+      description: llegaraAlLimite
+        ? MENSAJE_LIMITE_STOCK
+        : "¡Listo para cotizar en tu carrito!",
+      duration: 2500,
     });
     setEstaAgregando(true);
     setCantidad(1);
@@ -92,23 +117,23 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   };
 
   return (
-    <>
-      <div className="product-card group relative">
-        {/* Botón flotante de edición para administradores */}
-        {isAdmin && (
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEditar?.(producto);
-            }}
-            className="absolute top-3 right-3 bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl z-10 shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
-            title="Editar Hardware"
-          >
-            <Pencil size={13} />
-          </button>
-        )}
-      {/* Badges de inventario premium */}
+    <div className="product-card group relative">
+      {/* Botón flotante de edición para administradores */}
+      {isAdmin && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onEditar?.(producto);
+          }}
+          className="absolute top-3 right-3 bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl z-10 shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+          title="Editar Hardware"
+        >
+          <Pencil size={13} />
+        </button>
+      )}
+
+      {/* Badges de inventario y descuento progresivo premium */}
       <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">
         {sinStock && (
           <span className="bg-red-600/90 text-white text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md shadow-lg backdrop-blur-sm self-start">
@@ -121,30 +146,60 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
           </span>
         )}
         {tieneDescuento && (
-          <span className={`text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 self-start transition-transform hover:scale-110 ${badge.className}`}>
-            {badge.showFire && <span className="animate-pulse">🔥</span>}
+          <span
+            className={`text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-xl flex items-center gap-1.5 self-start transition-all duration-300 hover:scale-110 ${badge.className}`}
+          >
+            <span className={badge.tier === 'high' ? 'animate-bounce' : 'animate-pulse'}>
+              {badge.icon}
+            </span>
             <span>-{badge.percentage}%</span>
+            {badge.tier === 'high' && (
+              <span className="text-[8px] bg-black/25 px-1.5 py-0.5 rounded-md tracking-wider">
+                HOT
+              </span>
+            )}
           </span>
         )}
       </div>
 
       {/* Enlace al detalle del producto */}
       <Link to={`/producto/${producto.id}`} className="block focus:outline-none">
-        {/* Contenedor de Imagen */}
+        {/* Contenedor de Imagen con Skeleton Limpio mientras carga */}
         <div className="product-card__image-wrapper overflow-hidden relative rounded-t-xl">
-          <img
-            src={producto.imagen}
-            alt={producto.nombre}
-            loading="lazy"
-            decoding="async"
-            width={600}
-            height={400}
-            className="product-card__image group-hover:scale-105 transition-transform duration-500"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
-            }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+          {!imgCargada && !imgConError && (
+            <div className="absolute inset-0 bg-themeInput animate-pulse flex flex-col items-center justify-center gap-2 z-[1]">
+              <Cpu size={28} className="text-themeTextMuted/30" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-themeTextMuted/40">
+                Cargando imagen...
+              </span>
+            </div>
+          )}
+
+          {imgConError ? (
+            <div className="w-full h-full bg-themeInput flex flex-col items-center justify-center gap-2 text-themeTextMuted/50 p-4 text-center">
+              <Cpu size={32} className="text-themeAccent/50" />
+              <span className="text-[10px] font-black uppercase tracking-widest">
+                {producto.marca || 'NEXUS // CORE'}
+              </span>
+            </div>
+          ) : (
+            <img
+              key={producto.imagen}
+              src={producto.imagen}
+              alt={producto.nombre}
+              loading="lazy"
+              decoding="async"
+              width={600}
+              height={400}
+              onLoad={() => setLoadedSrc(producto.imagen)}
+              onError={() => setErrorSrc(producto.imagen)}
+              className={`product-card__image group-hover:scale-105 transition-all duration-500 ${
+                imgCargada ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          )}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4 z-[2]">
             <span className="text-[10px] bg-themeCard/90 text-themeText font-bold uppercase tracking-wider py-1.5 px-3 rounded-full shadow-md backdrop-blur-sm border border-themeBorder/40">
               Ver detalles
             </span>
@@ -193,9 +248,9 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
 
             <button
               onClick={aumentar}
-              disabled={bloqueado || cantidadVisible >= restante}
+              disabled={bloqueado}
               aria-label="Aumentar cantidad"
-              className={`product-card__counter-btn ${bloqueado || cantidadVisible >= restante ? 'opacity-30 cursor-not-allowed' : ''}`}
+              className={`product-card__counter-btn ${bloqueado || cantidadVisible >= restante ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               +
             </button>
@@ -204,7 +259,7 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
 
         {limiteAlcanzado && (
           <p className="text-[10px] text-amber-500 font-bold text-center leading-tight" role="status">
-            Límite alcanzado ({enCarrito} en el carrito)
+            {MENSAJE_LIMITE_STOCK} ({enCarrito}/{stockDisponible})
           </p>
         )}
 
@@ -223,7 +278,6 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
           {sinStock ? "Agotado" : limiteAlcanzado ? "Stock máximo en carrito" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
         </button>
       </div>
-      </div>
-    </>
+    </div>
   );
 });

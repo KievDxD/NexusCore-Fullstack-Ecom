@@ -7,10 +7,33 @@ import { LISTA_PRODUCTOS } from '../data/productos';
 const CACHE_TTL_MS = 120_000;
 const FETCH_TIMEOUT_MS = 8000;
 const CATALOG_PAGE_SIZE = 100;
+const CATALOG_STORAGE_KEY = 'nexus_catalog_cache_v2';
 
-// Selección explícita de columnas para el listado del catálogo (evita traer textos largos o JSONs pesados si no se requieren, manteniendo compatibilidad)
+// Selección explícita de columnas para el listado del catálogo
 const PRODUCTO_CATALOG_COLUMNS =
   'id, nombre, precio, imagen, categoria, descripcion, descripcion_larga, especificaciones, marca, stock, descuento';
+
+function loadCachedCatalog(): Producto[] | null {
+  try {
+    const raw = localStorage.getItem(CATALOG_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as Producto[];
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function saveCachedCatalog(productos: Producto[]) {
+  try {
+    localStorage.setItem(CATALOG_STORAGE_KEY, JSON.stringify(productos));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 interface ProductosState {
   productos: Producto[];
@@ -43,18 +66,25 @@ export function invalidateProductoDetalleCache(id?: number) {
   }
 }
 
+const initialCachedCatalog = loadCachedCatalog();
+
 export const useProductosStore = create<ProductosState>((set, get) => ({
-  productos: LISTA_PRODUCTOS, // Stale-While-Revalidate: arranca con datos locales
-  cargando: false,
+  // Nunca iniciar con LISTA_PRODUCTOS de prueba para evitar mostrar imágenes irrelevantes antes de cargar la BD real
+  productos: initialCachedCatalog ?? [],
+  cargando: initialCachedCatalog === null,
   ultimaActualizacion: 0,
 
   fetchProductos: async (force = false) => {
-    const { ultimaActualizacion, cargando } = get();
+    const { ultimaActualizacion, cargando, productos } = get();
 
     // Evitamos peticiones concurrentes o re-fetch dentro del TTL, salvo que sea forzado
-    if (cargando || (!force && Date.now() - ultimaActualizacion < CACHE_TTL_MS)) return;
+    if ((cargando && ultimaActualizacion > 0) || (!force && ultimaActualizacion > 0 && Date.now() - ultimaActualizacion < CACHE_TTL_MS)) {
+      return;
+    }
 
-    set({ cargando: true });
+    if (productos.length === 0) {
+      set({ cargando: true });
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -68,13 +98,20 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
         .abortSignal(controller.signal);
 
       if (error || !data || data.length === 0) {
-        console.warn('Manteniendo catálogo local (fallback) por error, timeout o base de datos vacía');
+        if (get().productos.length === 0) {
+          set({ productos: LISTA_PRODUCTOS, ultimaActualizacion: Date.now() });
+        }
         return;
       }
 
-      set({ productos: data as Producto[], ultimaActualizacion: Date.now() });
+      const listaReal = data as Producto[];
+      saveCachedCatalog(listaReal);
+      set({ productos: listaReal, ultimaActualizacion: Date.now() });
     } catch (err) {
-      console.error('Error inesperado en fetch de productos, manteniendo fallback local:', err);
+      console.error('Error inesperado en fetch de productos:', err);
+      if (get().productos.length === 0) {
+        set({ productos: LISTA_PRODUCTOS });
+      }
     } finally {
       clearTimeout(timer);
       set({ cargando: false });
@@ -101,7 +138,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
 
       if (!rpcError && rpcData) {
         const productoCompleto = rpcData as unknown as Producto;
-        set((state) => ({ productos: [...state.productos, productoCompleto] }));
+        set((state) => {
+          const next = [...state.productos, productoCompleto];
+          saveCachedCatalog(next);
+          return { productos: next };
+        });
         return productoCompleto;
       }
 
@@ -148,7 +189,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       }
 
       const productoCompleto: Producto = { ...(data as Producto), imagenes: finalImgs };
-      set((state) => ({ productos: [...state.productos, productoCompleto] }));
+      set((state) => {
+        const next = [...state.productos, productoCompleto];
+        saveCachedCatalog(next);
+        return { productos: next };
+      });
       return productoCompleto;
     } catch (err) {
       console.error('Error en agregarProductoStore:', err);
@@ -182,9 +227,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
         if (!rpcError && rpcData) {
           const actualizado = rpcData as unknown as Producto;
           invalidateProductoDetalleCache(id);
-          set((state) => ({
-            productos: state.productos.map((p) => (p.id === id ? actualizado : p)),
-          }));
+          set((state) => {
+            const next = state.productos.map((p) => (p.id === id ? actualizado : p));
+            saveCachedCatalog(next);
+            return { productos: next };
+          });
           return;
         }
       }
@@ -231,13 +278,15 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       }
 
       invalidateProductoDetalleCache(id);
-      set((state) => ({
-        productos: state.productos.map((p) =>
+      set((state) => {
+        const next = state.productos.map((p) =>
           p.id === id
             ? { ...p, ...cambiosBase, ...(imagenesFinales !== undefined ? { imagenes: imagenesFinales } : {}) }
             : p
-        ),
-      }));
+        );
+        saveCachedCatalog(next);
+        return { productos: next };
+      });
     } catch (err) {
       console.error('Error en actualizarProductoStore:', err);
       throw toError(err);
@@ -249,7 +298,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       const { error } = await supabase.from('productos').delete().eq('id', id);
       if (error) throw error;
       invalidateProductoDetalleCache(id);
-      set((state) => ({ productos: state.productos.filter((p) => p.id !== id) }));
+      set((state) => {
+        const next = state.productos.filter((p) => p.id !== id);
+        saveCachedCatalog(next);
+        return { productos: next };
+      });
     } catch (err) {
       console.error('Error en eliminarProductoStore:', err);
       throw toError(err);
@@ -261,7 +314,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       const { error } = await supabase.from('productos').update({ stock: nuevoStock }).gte('id', 0);
       if (error) throw error;
       invalidateProductoDetalleCache();
-      set((state) => ({ productos: state.productos.map((p) => ({ ...p, stock: nuevoStock })) }));
+      set((state) => {
+        const next = state.productos.map((p) => ({ ...p, stock: nuevoStock }));
+        saveCachedCatalog(next);
+        return { productos: next };
+      });
     } catch (err) {
       console.error('Error en bulkUpdateStock:', err);
       throw toError(err);
@@ -273,9 +330,11 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       const { error } = await supabase.from('productos').update({ descuento }).eq('categoria', categoria);
       if (error) throw error;
       invalidateProductoDetalleCache();
-      set((state) => ({
-        productos: state.productos.map((p) => (p.categoria === categoria ? { ...p, descuento } : p)),
-      }));
+      set((state) => {
+        const next = state.productos.map((p) => (p.categoria === categoria ? { ...p, descuento } : p));
+        saveCachedCatalog(next);
+        return { productos: next };
+      });
     } catch (err) {
       console.error('Error en bulkCategoryDiscount:', err);
       throw toError(err);
@@ -305,9 +364,25 @@ const normalizarResena = (r: ResenaRow, perfil: ResenaPerfil | null): Resena => 
   profiles: perfil,
 });
 
+// Garantiza que la imagen principal del producto sea SIEMPRE la primera y no sea desplazada por imágenes antiguas de galería
+const normalizarGaleriaProducto = (imagenPrincipal: string, galeria?: ProductoImagen[] | null): ProductoImagen[] => {
+  const resultado: ProductoImagen[] = [];
+  const principal = (imagenPrincipal || '').trim();
+  if (principal) {
+    resultado.push({ id: 0, url: principal, orden: 0 });
+  }
+  (galeria ?? []).forEach((img, idx) => {
+    const url = (img?.url || '').trim();
+    if (url && !resultado.some((item) => item.url === url)) {
+      resultado.push({ id: img.id ?? idx + 1, url, orden: resultado.length });
+    }
+  });
+  return resultado;
+};
+
 const conImagenLocal = (p: Producto): Producto => ({
   ...p,
-  imagenes: p.imagenes && p.imagenes.length > 0 ? p.imagenes : [{ id: 0, url: p.imagen, orden: 0 }],
+  imagenes: normalizarGaleriaProducto(p.imagen, p.imagenes),
 });
 
 async function resenasSinJoin(id: number, signal: AbortSignal): Promise<Resena[]> {
@@ -366,7 +441,7 @@ export async function fetchProductoDetalle(
       if (!rpcError && rpcData) {
         const parsed = rpcData as { producto: Producto; resenas: Resena[] };
         const base = parsed.producto;
-        const imgs = base.imagenes && base.imagenes.length > 0 ? base.imagenes : [{ id: 0, url: base.imagen, orden: 0 }];
+        const imgs = normalizarGaleriaProducto(base.imagen, base.imagenes);
         const result = {
           producto: { ...base, imagenes: imgs },
           resenas: parsed.resenas ?? [],
@@ -404,7 +479,7 @@ export async function fetchProductoDetalle(
       } else {
         const base = prodResult.data as Producto;
         const imgs = (imgsResult.data ?? []) as ProductoImagen[];
-        producto = { ...base, imagenes: imgs.length > 0 ? imgs : [{ id: 0, url: base.imagen, orden: 0 }] };
+        producto = { ...base, imagenes: normalizarGaleriaProducto(base.imagen, imgs) };
       }
 
       let resenas: Resena[] = [];

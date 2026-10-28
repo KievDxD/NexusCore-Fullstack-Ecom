@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
 import { getDiscountBadgeStyle } from '../utils/discount';
-import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil, Cpu } from 'lucide-react';
 import { toast } from 'sonner';
 
 const AdminProductoModal = lazy(() => import('../components/AdminProductoModal'));
@@ -41,6 +41,8 @@ export default function PaginaProducto() {
 
   // Estados de galería
   const [imagenActiva, setImagenActiva] = useState('');
+  const [loadedMainSrc, setLoadedMainSrc] = useState<string | null>(null);
+  const [errorMainSrc, setErrorMainSrc] = useState<string | null>(null);
   const [zoomAbierto, setZoomAbierto] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
@@ -66,9 +68,17 @@ export default function PaginaProducto() {
   const [modalZoomed, setModalZoomed] = useState(false);
   const [modalZoomPos, setModalZoomPos] = useState({ x: 50, y: 50 });
 
-  const imagenesArray = producto?.imagenes && producto.imagenes.length > 0
-    ? producto.imagenes.map(img => img.url).filter(Boolean)
-    : producto && producto.imagen ? [producto.imagen] : [];
+  const imagenesArray = (() => {
+    if (!producto) return [];
+    const urls: string[] = [];
+    if (producto.imagen) urls.push(producto.imagen);
+    if (producto.imagenes) {
+      producto.imagenes.forEach((img) => {
+        if (img.url && !urls.includes(img.url)) urls.push(img.url);
+      });
+    }
+    return urls;
+  })();
 
   const currentIdx = imagenesArray.indexOf(imagenActiva) !== -1 ? imagenesArray.indexOf(imagenActiva) : 0;
 
@@ -107,11 +117,11 @@ export default function PaginaProducto() {
       if (res && res.producto) {
         setProducto(res.producto);
         setResenas(res.resenas || []);
-        // Inicializar la imagen activa de forma segura
+        // La imagen principal (producto.imagen) SIEMPRE tiene prioridad inicial
         const validImgs = res.producto.imagenes && res.producto.imagenes.length > 0
           ? res.producto.imagenes.map((img) => img.url).filter(Boolean)
           : [];
-        const defaultImg = validImgs.length > 0 ? validImgs[0] : (res.producto.imagen || '');
+        const defaultImg = res.producto.imagen || validImgs[0] || '';
         setImagenActiva(defaultImg);
       } else {
         toast.error("Producto no encontrado o tiempo de espera agotado");
@@ -169,6 +179,9 @@ export default function PaginaProducto() {
 
   if (!producto) return null;
 
+  const mainImgCargada = Boolean(imagenActiva) && loadedMainSrc === imagenActiva;
+  const mainImgConError = !imagenActiva || errorMainSrc === imagenActiva;
+
   const badge = getDiscountBadgeStyle(producto.descuento);
   const tieneDescuento = badge.tier !== 'none';
   const precioOriginal = convertPrice(producto.precio, currency, rates);
@@ -190,14 +203,49 @@ export default function PaginaProducto() {
   const totalPuntos = resenas.reduce((sum, res) => sum + res.puntuacion, 0);
   const promedioPuntuacion = resenas.length > 0 ? (totalPuntos / resenas.length).toFixed(1) : 'Nuevo';
 
+  const handleAumentar = () => {
+    if (bloqueado) {
+      toast.warning(MENSAJE_LIMITE_STOCK, {
+        description: `Ya tienes las ${stockDisponible} unidades disponibles en tu carrito.`,
+      });
+      return;
+    }
+    if (cantidadVisible < restante) {
+      const nuevaCant = cantidadVisible + 1;
+      setCantidad(nuevaCant);
+      if (nuevaCant >= restante) {
+        toast.warning("Límite de stock alcanzado", {
+          description:
+            enCarrito > 0
+              ? `${MENSAJE_LIMITE_STOCK} (${enCarrito} en carrito + ${nuevaCant} seleccionada(s) = ${stockDisponible} máx).`
+              : `${MENSAJE_LIMITE_STOCK} (${stockDisponible} unidades disponibles).`,
+        });
+      }
+    } else {
+      toast.warning("Límite de stock", {
+        description:
+          enCarrito > 0
+            ? `${MENSAJE_LIMITE_STOCK}. Ya tienes ${enCarrito} en el carrito y ${cantidadVisible} seleccionada(s).`
+            : `Solo hay ${stockDisponible} unidades disponibles.`,
+      });
+    }
+  };
+
   const handleAgregar = () => {
     if (sinStock) return;
     // Guardián: no se toca el store si ya se alcanzó el stock
-    if (limiteAlcanzado || cantidadVisible <= 0 || !agregarProducto(producto, cantidadVisible)) {
+    if (limiteAlcanzado || cantidadVisible <= 0) {
       toast.info(MENSAJE_LIMITE_STOCK);
       return;
     }
-    toast.success(`Añadido: ${cantidadVisible}x ${producto.nombre} al carrito`);
+    const llegaraAlLimite = enCarrito + cantidadVisible >= stockDisponible;
+    if (!agregarProducto(producto, cantidadVisible)) {
+      toast.info(MENSAJE_LIMITE_STOCK);
+      return;
+    }
+    toast.success(`Añadido: ${cantidadVisible}x ${producto.nombre} al carrito`, {
+      description: llegaraAlLimite ? MENSAJE_LIMITE_STOCK : "¡Listo para cotizar en tu carrito!",
+    });
     setCantidad(1);
     setEstaAgregando(true);
     setTimeout(() => setEstaAgregando(false), 1000);
@@ -301,9 +349,9 @@ export default function PaginaProducto() {
         {/* 📸 SECCIÓN IZQUIERDA: GALERÍA DE IMÁGENES */}
         <div className="md:col-span-6 space-y-4">
           
-          {/* Foto Principal */}
+          {/* Foto Principal con Skeleton Limpio mientras carga */}
           <div 
-            className="relative group aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center shadow-[0_8px_32px_0_rgba(0,0,0,0.25)] backdrop-blur-xl cursor-zoom-in transition-all duration-500 hover:border-white/20 hover:shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]"
+            className="relative group aspect-[4/3] rounded-3xl overflow-hidden border border-white/10 bg-themeInput/50 flex items-center justify-center shadow-[0_8px_32px_0_rgba(0,0,0,0.25)] backdrop-blur-xl cursor-zoom-in transition-all duration-500 hover:border-white/20 hover:shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => {
               setIsHovered(false);
@@ -312,23 +360,44 @@ export default function PaginaProducto() {
             onMouseMove={handleMouseMove}
             onClick={() => setZoomAbierto(true)}
           >
-            <img 
-              src={imagenActiva} 
-              alt={producto.nombre} 
-              width={800}
-              height={600}
-              fetchPriority="high"
-              decoding="async"
-              style={{
-                transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
-                transform: isHovered ? 'scale(2.2)' : 'scale(1)'
-              }}
-              className="w-full h-full object-contain p-4 transition-transform duration-300 ease-out drop-shadow-2xl"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
-              }}
-            />
-            {isHovered && (
+            {!mainImgCargada && !mainImgConError && (
+              <div className="absolute inset-0 bg-themeInput animate-pulse flex flex-col items-center justify-center gap-3 z-[1]">
+                <Cpu size={40} className="text-themeTextMuted/30" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-themeTextMuted/40">
+                  Cargando imagen...
+                </span>
+              </div>
+            )}
+
+            {mainImgConError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-themeTextMuted/60 p-6 text-center">
+                <Cpu size={48} className="text-themeAccent/50" />
+                <span className="text-xs font-black uppercase tracking-widest">
+                  {producto.marca || 'NEXUS // CORE'}
+                </span>
+              </div>
+            ) : (
+              <img 
+                key={imagenActiva}
+                src={imagenActiva} 
+                alt={producto.nombre} 
+                width={800}
+                height={600}
+                fetchPriority="high"
+                decoding="async"
+                onLoad={() => setLoadedMainSrc(imagenActiva)}
+                onError={() => setErrorMainSrc(imagenActiva)}
+                style={{
+                  transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
+                  transform: isHovered ? 'scale(2.2)' : 'scale(1)'
+                }}
+                className={`w-full h-full object-contain p-4 transition-all duration-300 ease-out drop-shadow-2xl ${
+                  mainImgCargada ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            )}
+
+            {isHovered && mainImgCargada && (
               <div 
                 className="absolute pointer-events-none border-2 border-themeAccent rounded-full w-28 h-28 shadow-lg shadow-themeAccent/20 bg-themeAccent/5 backdrop-blur-[0.5px]"
                 style={{
@@ -343,7 +412,7 @@ export default function PaginaProducto() {
                 e.stopPropagation();
                 setZoomAbierto(true);
               }}
-              className="absolute bottom-4 right-4 bg-themeCard/90 hover:bg-themeCard text-themeText p-2 rounded-xl border border-themeBorder/60 shadow-lg backdrop-blur-sm transition-all active:scale-95 flex items-center gap-1.5 text-xs font-black uppercase tracking-wider"
+              className="absolute bottom-4 right-4 bg-themeCard/90 hover:bg-themeCard text-themeText p-2 rounded-xl border border-themeBorder/60 shadow-lg backdrop-blur-sm transition-all active:scale-95 flex items-center gap-1.5 text-xs font-black uppercase tracking-wider z-[2]"
             >
               <ZoomIn size={14} className="text-themeAccent" />
               Zoom
@@ -351,15 +420,23 @@ export default function PaginaProducto() {
           </div>
 
           {/* Galería de miniaturas (Thumbnails) */}
-          {producto.imagenes && producto.imagenes.length > 0 && (
+          {imagenesArray.length > 1 && (
             <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-none">
-              {producto.imagenes.map((img) => (
+              {imagenesArray.map((url, idx) => (
                 <button
-                  key={img.id}
-                  onClick={() => setImagenActiva(img.url)}
-                  className={`relative w-20 aspect-[4/3] rounded-xl overflow-hidden border-2 transition-all flex-shrink-0 bg-themeInput/30 ${imagenActiva === img.url ? 'border-themeAccent shadow-sm scale-98' : 'border-themeBorder hover:border-themeAccent/40'}`}
+                  key={`${url}-${idx}`}
+                  onClick={() => setImagenActiva(url)}
+                  className={`relative w-20 aspect-[4/3] rounded-xl overflow-hidden border-2 transition-all flex-shrink-0 bg-themeInput/30 ${imagenActiva === url ? 'border-themeAccent shadow-sm scale-98' : 'border-themeBorder hover:border-themeAccent/40'}`}
                 >
-                  <img src={img.url} alt="Miniatura" width={80} height={60} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                  <img
+                    src={url}
+                    alt={`Miniatura ${idx + 1}`}
+                    width={80}
+                    height={60}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full h-full object-cover"
+                  />
                 </button>
               ))}
             </div>
@@ -411,8 +488,9 @@ export default function PaginaProducto() {
                     <p className="text-sm text-themeTextMuted line-through opacity-70">
                       {precioOriginalFormateado}
                     </p>
-                    <span className={`text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-md flex items-center gap-1 ${badge.className}`}>
-                      {badge.showFire && <span className="animate-pulse">🔥</span>} AHORRAS {badge.percentage}%
+                    <span className={`text-[10px] uppercase tracking-widest px-3 py-1 rounded-lg flex items-center gap-1.5 transition-all ${badge.className}`}>
+                      <span className={badge.tier === 'high' ? 'animate-bounce' : 'animate-pulse'}>{badge.icon}</span>
+                      <span>{badge.label} · AHORRAS {badge.percentage}%</span>
                     </span>
                   </div>
                 )}
@@ -450,10 +528,10 @@ export default function PaginaProducto() {
                 </button>
                 <span className="font-bold text-sm">{cantidadVisible}</span>
                 <button
-                  onClick={() => cantidadVisible < restante ? setCantidad(cantidadVisible + 1) : toast.warning(MENSAJE_LIMITE_STOCK)}
-                  disabled={bloqueado || cantidadVisible >= restante}
+                  onClick={handleAumentar}
+                  disabled={bloqueado}
                   aria-label="Aumentar cantidad"
-                  className="px-3 py-1.5 font-bold hover:text-themeAccent disabled:opacity-30 disabled:cursor-not-allowed"
+                  className={`px-3 py-1.5 font-bold hover:text-themeAccent disabled:opacity-30 disabled:cursor-not-allowed ${cantidadVisible >= restante ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
                   +
                 </button>
@@ -723,6 +801,7 @@ export default function PaginaProducto() {
               onClick={(e) => e.stopPropagation()}
             >
               <img 
+                key={imagenActiva}
                 src={(imagenActiva || '').replace('&w=600', '&w=1600')} 
                 alt={producto.nombre} 
                 draggable={false}
@@ -742,9 +821,6 @@ export default function PaginaProducto() {
                     ? 'scale-[2.5] cursor-grab active:cursor-grabbing' 
                     : 'scale-100 cursor-zoom-in hover:scale-[1.02] drop-shadow-2xl'
                 }`}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://placehold.co/600x400/1e293b/475569?text=Hardware';
-                }}
               />
               {/* Indicador de zoom activo */}
               {modalZoomed && (
@@ -774,7 +850,7 @@ export default function PaginaProducto() {
             <div className="w-full py-3 flex justify-center gap-2.5 z-10 shrink-0" onClick={(e) => e.stopPropagation()}>
               {imagenesArray.map((url, idx) => (
                 <button
-                  key={idx}
+                  key={`${url}-${idx}`}
                   onClick={() => {
                     setImagenActiva(url);
                     setModalZoomed(false);
