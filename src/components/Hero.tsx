@@ -1,14 +1,14 @@
 import { memo } from 'react';
 import { useSettings } from '../hooks/useSettings';
-import { useProductos } from '../hooks/useProductos';
+import { useProductosStore } from '../hooks/useProductos';
 import { Sparkles, Terminal } from 'lucide-react';
 
 export default memo(function Hero() {
-  const { whatsappNumber } = useSettings();
-  const { productos } = useProductos();
-
-  const totalArticulos = productos.length || 12;
-  const articulosEnStock = productos.filter(p => (p.stock ?? 10) > 0).length || 12;
+  const whatsappNumber = useSettings((s) => s.whatsappNumber);
+  const totalArticulos = useProductosStore((s) => s.productos.length || 12);
+  const articulosEnStock = useProductosStore(
+    (s) => s.productos.filter((p) => (p.stock ?? 10) > 0).length || 12
+  );
   const porcentajeStock = (articulosEnStock / totalArticulos) * 100;
 
   const abrirWhatsApp = () => {

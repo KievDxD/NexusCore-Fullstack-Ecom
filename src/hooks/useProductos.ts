@@ -6,6 +6,11 @@ import { LISTA_PRODUCTOS } from '../data/productos';
 
 const CACHE_TTL_MS = 120_000;
 const FETCH_TIMEOUT_MS = 8000;
+const CATALOG_PAGE_SIZE = 100;
+
+// Selección explícita de columnas para el listado del catálogo (evita traer textos largos o JSONs pesados si no se requieren, manteniendo compatibilidad)
+const PRODUCTO_CATALOG_COLUMNS =
+  'id, nombre, precio, imagen, categoria, descripcion, descripcion_larga, especificaciones, marca, stock, descuento';
 
 interface ProductosState {
   productos: Producto[];
@@ -25,6 +30,19 @@ const toError = (err: unknown): Error => {
   return new Error(typeof msg === 'string' ? msg : String(err), { cause: err });
 };
 
+// Deduplicación de peticiones en vuelo + caché de detalle por ID (evita waterfalls y doble fetch en StrictMode)
+const detalleCache = new Map<number, { data: { producto: Producto | null; resenas: Resena[] }; timestamp: number }>();
+const detalleInflight = new Map<number, Promise<{ producto: Producto | null; resenas: Resena[] }>>();
+const DETALLE_CACHE_TTL_MS = 60_000;
+
+export function invalidateProductoDetalleCache(id?: number) {
+  if (id !== undefined) {
+    detalleCache.delete(id);
+  } else {
+    detalleCache.clear();
+  }
+}
+
 export const useProductosStore = create<ProductosState>((set, get) => ({
   productos: LISTA_PRODUCTOS, // Stale-While-Revalidate: arranca con datos locales
   cargando: false,
@@ -38,15 +56,15 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
 
     set({ cargando: true });
 
-    // AbortController real: cancela la petición (antes Promise.race la dejaba viva)
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     try {
       const { data, error } = await supabase
         .from('productos')
-        .select('*')
+        .select(PRODUCTO_CATALOG_COLUMNS)
         .order('id', { ascending: true })
+        .range(0, CATALOG_PAGE_SIZE - 1)
         .abortSignal(controller.signal);
 
       if (error || !data || data.length === 0) {
@@ -59,13 +77,35 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       console.error('Error inesperado en fetch de productos, manteniendo fallback local:', err);
     } finally {
       clearTimeout(timer);
-      // Siempre se libera el flag, incluso en timeout (antes quedaba atascado en true)
       set({ cargando: false });
     }
   },
 
   agregarProductoStore: async (nuevoProd) => {
     try {
+      // 1. Intentar mediante RPC transaccional en un solo round-trip
+      const { data: rpcData, error: rpcError } = await supabase.rpc('upsert_producto_con_imagenes', {
+        p_id: null,
+        p_nombre: nuevoProd.nombre,
+        p_precio: nuevoProd.precio,
+        p_imagen: nuevoProd.imagen,
+        p_categoria: nuevoProd.categoria,
+        p_descripcion: nuevoProd.descripcion,
+        p_descripcion_larga: nuevoProd.descripcion_larga ?? null,
+        p_especificaciones: nuevoProd.especificaciones ?? null,
+        p_marca: nuevoProd.marca ?? null,
+        p_stock: nuevoProd.stock ?? 10,
+        p_descuento: nuevoProd.descuento ?? 0,
+        p_imagenes: nuevoProd.imagenes ?? [],
+      });
+
+      if (!rpcError && rpcData) {
+        const productoCompleto = rpcData as unknown as Producto;
+        set((state) => ({ productos: [...state.productos, productoCompleto] }));
+        return productoCompleto;
+      }
+
+      // 2. Fallback directo si la migración RPC aún no ha sido ejecutada en la instancia remota
       const { data, error } = await supabase
         .from('productos')
         .insert({
@@ -80,7 +120,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
           stock: nuevoProd.stock,
           descuento: nuevoProd.descuento ?? 0,
         })
-        .select()
+        .select(PRODUCTO_CATALOG_COLUMNS)
         .single();
 
       if (error) throw error;
@@ -118,8 +158,38 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
 
   actualizarProductoStore: async (id, cambios) => {
     try {
+      const actual = get().productos.find((p) => p.id === id);
       const { imagenes, ...cambiosBase } = cambios;
 
+      // 1. Intentar mediante RPC transaccional en un solo round-trip
+      if (actual) {
+        const merged = { ...actual, ...cambiosBase };
+        const { data: rpcData, error: rpcError } = await supabase.rpc('upsert_producto_con_imagenes', {
+          p_id: id,
+          p_nombre: merged.nombre,
+          p_precio: merged.precio,
+          p_imagen: merged.imagen,
+          p_categoria: merged.categoria,
+          p_descripcion: merged.descripcion,
+          p_descripcion_larga: merged.descripcion_larga ?? null,
+          p_especificaciones: merged.especificaciones ?? null,
+          p_marca: merged.marca ?? null,
+          p_stock: merged.stock ?? 10,
+          p_descuento: merged.descuento ?? 0,
+          p_imagenes: imagenes !== undefined ? imagenes : null,
+        });
+
+        if (!rpcError && rpcData) {
+          const actualizado = rpcData as unknown as Producto;
+          invalidateProductoDetalleCache(id);
+          set((state) => ({
+            productos: state.productos.map((p) => (p.id === id ? actualizado : p)),
+          }));
+          return;
+        }
+      }
+
+      // 2. Fallback secuencial si la RPC no está disponible
       if (Object.keys(cambiosBase).length > 0) {
         const { error } = await supabase.from('productos').update(cambiosBase).eq('id', id);
         if (error) throw error;
@@ -128,8 +198,6 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
       let imagenesFinales: ProductoImagen[] | undefined;
 
       if (imagenes !== undefined) {
-        // Reemplazo seguro: primero se insertan las nuevas y SOLO si funciona se borran las viejas.
-        // Así un fallo a mitad de camino nunca deja el producto sin imágenes.
         const { data: previas, error: prevError } = await supabase
           .from('producto_imagenes')
           .select('id')
@@ -162,6 +230,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
         }
       }
 
+      invalidateProductoDetalleCache(id);
       set((state) => ({
         productos: state.productos.map((p) =>
           p.id === id
@@ -177,9 +246,9 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
 
   eliminarProductoStore: async (id) => {
     try {
-      // ON DELETE CASCADE limpia producto_imagenes y resenas
       const { error } = await supabase.from('productos').delete().eq('id', id);
       if (error) throw error;
+      invalidateProductoDetalleCache(id);
       set((state) => ({ productos: state.productos.filter((p) => p.id !== id) }));
     } catch (err) {
       console.error('Error en eliminarProductoStore:', err);
@@ -191,6 +260,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     try {
       const { error } = await supabase.from('productos').update({ stock: nuevoStock }).gte('id', 0);
       if (error) throw error;
+      invalidateProductoDetalleCache();
       set((state) => ({ productos: state.productos.map((p) => ({ ...p, stock: nuevoStock })) }));
     } catch (err) {
       console.error('Error en bulkUpdateStock:', err);
@@ -202,6 +272,7 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
     try {
       const { error } = await supabase.from('productos').update({ descuento }).eq('categoria', categoria);
       if (error) throw error;
+      invalidateProductoDetalleCache();
       set((state) => ({
         productos: state.productos.map((p) => (p.categoria === categoria ? { ...p, descuento } : p)),
       }));
@@ -212,9 +283,10 @@ export const useProductosStore = create<ProductosState>((set, get) => ({
   },
 }));
 
-// ───────────────────────── Detalle de producto (fuera del hook: función pura y estable)
+// ───────────────────────── Detalle de producto (con caché en memoria, deduplicación y RPC unificada)
 
-const DB_TIMEOUT_MS = 2500;
+const DB_TIMEOUT_MS = 3000;
+const RESENAS_PAGE_SIZE = 50;
 
 type ResenaRow = {
   id: number;
@@ -235,7 +307,7 @@ const normalizarResena = (r: ResenaRow, perfil: ResenaPerfil | null): Resena => 
 
 const conImagenLocal = (p: Producto): Producto => ({
   ...p,
-  imagenes: [{ id: 0, url: p.imagen, orden: 0 }],
+  imagenes: p.imagenes && p.imagenes.length > 0 ? p.imagenes : [{ id: 0, url: p.imagen, orden: 0 }],
 });
 
 async function resenasSinJoin(id: number, signal: AbortSignal): Promise<Resena[]> {
@@ -244,6 +316,7 @@ async function resenasSinJoin(id: number, signal: AbortSignal): Promise<Resena[]
     .select('id, puntuacion, comentario, created_at, user_id')
     .eq('producto_id', id)
     .order('created_at', { ascending: false })
+    .range(0, RESENAS_PAGE_SIZE - 1)
     .abortSignal(signal);
 
   const rows = (data ?? []) as ResenaRow[];
@@ -263,63 +336,109 @@ async function resenasSinJoin(id: number, signal: AbortSignal): Promise<Resena[]
   return rows.map((r) => normalizarResena(r, (r.user_id && perfiles.get(r.user_id)) || null));
 }
 
-export async function fetchProductoDetalle(id: number): Promise<{ producto: Producto | null; resenas: Resena[] }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DB_TIMEOUT_MS);
-  const localProd = LISTA_PRODUCTOS.find((p) => p.id === id);
-  const fallback = localProd ? conImagenLocal(localProd) : null;
-
-  try {
-    const [prodResult, imgsResult, resenasResult] = await Promise.all([
-      supabase.from('productos').select('*').eq('id', id).abortSignal(controller.signal).maybeSingle(),
-      supabase
-        .from('producto_imagenes')
-        .select('id, url, orden')
-        .eq('producto_id', id)
-        .order('orden', { ascending: true })
-        .abortSignal(controller.signal),
-      supabase
-        .from('resenas')
-        .select('id, puntuacion, comentario, created_at, user_id, profiles(username, avatar_url)')
-        .eq('producto_id', id)
-        .order('created_at', { ascending: false })
-        .abortSignal(controller.signal),
-    ]);
-
-    let producto: Producto | null;
-    if (prodResult.error || !prodResult.data) {
-      console.warn(`Producto #${id} no encontrado en Supabase o error:`, prodResult.error);
-      producto = fallback;
-    } else {
-      const base = prodResult.data as Producto;
-      const imgs = (imgsResult.data ?? []) as ProductoImagen[];
-      producto = { ...base, imagenes: imgs.length > 0 ? imgs : [{ id: 0, url: base.imagen, orden: 0 }] };
+export async function fetchProductoDetalle(
+  id: number,
+  force = false
+): Promise<{ producto: Producto | null; resenas: Resena[] }> {
+  const now = Date.now();
+  if (!force) {
+    const cached = detalleCache.get(id);
+    if (cached && now - cached.timestamp < DETALLE_CACHE_TTL_MS) {
+      return cached.data;
     }
-
-    let resenas: Resena[] = [];
-    if (resenasResult.error) {
-      console.warn('Fallo al obtener reseñas con perfiles, intentando sin join:', resenasResult.error);
-      try {
-        resenas = await resenasSinJoin(id, controller.signal);
-      } catch (e) {
-        console.error('Error definitivo al cargar reseñas fallback:', e);
-      }
-    } else {
-      resenas = ((resenasResult.data ?? []) as unknown as ResenaRow[]).map((r) =>
-        normalizarResena(r, Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : (r.profiles ?? null))
-      );
-    }
-
-    return { producto, resenas };
-  } catch (err) {
-    console.warn(`Timeout/error al obtener producto #${id} desde Supabase. Usando catálogo local.`, err);
-    return { producto: fallback, resenas: [] };
-  } finally {
-    clearTimeout(timer);
+    const inflight = detalleInflight.get(id);
+    if (inflight) return inflight;
   }
+
+  const promise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DB_TIMEOUT_MS);
+    const storeProd = useProductosStore.getState().productos.find((p) => p.id === id);
+    const localProd = storeProd ?? LISTA_PRODUCTOS.find((p) => p.id === id);
+    const fallback = localProd ? conImagenLocal(localProd) : null;
+
+    try {
+      // 1. Intentar RPC unificada (1 solo viaje de red para producto + imágenes + reseñas)
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('get_producto_detalle', { p_id: id })
+        .abortSignal(controller.signal);
+
+      if (!rpcError && rpcData) {
+        const parsed = rpcData as { producto: Producto; resenas: Resena[] };
+        const base = parsed.producto;
+        const imgs = base.imagenes && base.imagenes.length > 0 ? base.imagenes : [{ id: 0, url: base.imagen, orden: 0 }];
+        const result = {
+          producto: { ...base, imagenes: imgs },
+          resenas: parsed.resenas ?? [],
+        };
+        detalleCache.set(id, { data: result, timestamp: Date.now() });
+        return result;
+      }
+
+      // 2. Fallback paralelo con selección explícita y paginación
+      const [prodResult, imgsResult, resenasResult] = await Promise.all([
+        supabase
+          .from('productos')
+          .select(PRODUCTO_CATALOG_COLUMNS)
+          .eq('id', id)
+          .abortSignal(controller.signal)
+          .maybeSingle(),
+        supabase
+          .from('producto_imagenes')
+          .select('id, url, orden')
+          .eq('producto_id', id)
+          .order('orden', { ascending: true })
+          .abortSignal(controller.signal),
+        supabase
+          .from('resenas')
+          .select('id, puntuacion, comentario, created_at, user_id, profiles(username, avatar_url)')
+          .eq('producto_id', id)
+          .order('created_at', { ascending: false })
+          .range(0, RESENAS_PAGE_SIZE - 1)
+          .abortSignal(controller.signal),
+      ]);
+
+      let producto: Producto | null;
+      if (prodResult.error || !prodResult.data) {
+        producto = fallback;
+      } else {
+        const base = prodResult.data as Producto;
+        const imgs = (imgsResult.data ?? []) as ProductoImagen[];
+        producto = { ...base, imagenes: imgs.length > 0 ? imgs : [{ id: 0, url: base.imagen, orden: 0 }] };
+      }
+
+      let resenas: Resena[] = [];
+      if (resenasResult.error) {
+        try {
+          resenas = await resenasSinJoin(id, controller.signal);
+        } catch (e) {
+          console.error('Error definitivo al cargar reseñas fallback:', e);
+        }
+      } else {
+        resenas = ((resenasResult.data ?? []) as unknown as ResenaRow[]).map((r) =>
+          normalizarResena(r, Array.isArray(r.profiles) ? (r.profiles[0] ?? null) : (r.profiles ?? null))
+        );
+      }
+
+      const result = { producto, resenas };
+      if (producto) {
+        detalleCache.set(id, { data: result, timestamp: Date.now() });
+      }
+      return result;
+    } catch (err) {
+      console.warn(`Timeout/error al obtener producto #${id} desde Supabase. Usando catálogo local.`, err);
+      return { producto: fallback, resenas: [] };
+    } finally {
+      clearTimeout(timer);
+      detalleInflight.delete(id);
+    }
+  })();
+
+  detalleInflight.set(id, promise);
+  return promise;
 }
 
-// ───────────────────────── Hook público (misma API que antes, pero con selectores)
+// ───────────────────────── Hook público
 
 export function useProductos() {
   const productos = useProductosStore((s) => s.productos);
@@ -332,7 +451,6 @@ export function useProductos() {
   const bulkCategoryDiscount = useProductosStore((s) => s.bulkCategoryDiscount);
 
   useEffect(() => {
-    // Respeta el TTL del store: no genera tráfico si la caché está fresca
     void fetchProductos();
   }, [fetchProductos]);
 

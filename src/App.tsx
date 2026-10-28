@@ -34,7 +34,26 @@ export default function App() {
   const backgroundColor = useSettings((state) => state.backgroundColor);
 
   useEffect(() => {
-    fetchRates();
+    void fetchRates();
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchRates();
+      }
+    };
+
+    const interval = setInterval(() => {
+      void fetchRates();
+    }, 30 * 60 * 1000);
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
   }, [fetchRates]);
 
   // Resolver la clase del tema correspondiente para aplicar variables CSS globales

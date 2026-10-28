@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Plus, Trash2, Loader2, Save, AlertTriangle, ImagePlus, Cpu, Tag, DollarSign, Package, FileText, Image as ImageIcon, Percent } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Producto } from '../types';
-import { useProductos } from '../hooks/useProductos';
+import { useProductosStore } from '../hooks/useProductos';
 
 interface AdminProductoModalProps {
   isOpen: boolean;
@@ -16,7 +16,9 @@ interface SpecItem {
 }
 
 export default function AdminProductoModal({ isOpen, onClose, productoAEditar }: AdminProductoModalProps) {
-  const { agregarProductoStore, actualizarProductoStore, eliminarProductoStore } = useProductos();
+  const agregarProductoStore = useProductosStore((s) => s.agregarProductoStore);
+  const actualizarProductoStore = useProductosStore((s) => s.actualizarProductoStore);
+  const eliminarProductoStore = useProductosStore((s) => s.eliminarProductoStore);
   const [cargando, setCargando] = useState(false);
   const [mostrarConfirmarEliminar, setMostrarConfirmarEliminar] = useState(false);
   const [cerrando, setCerrando] = useState(false);

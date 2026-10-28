@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
-import { useProductos } from '../hooks/useProductos';
-import { X, Settings, Check, User, ShieldAlert, Palette, Loader2, Upload, Package } from 'lucide-react';
+import { useProductosStore } from '../hooks/useProductos';
+import { X, Settings, Check, User, ShieldAlert, Palette, Loader2, Upload, Package, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SettingsModalProps {
@@ -13,7 +13,15 @@ interface SettingsModalProps {
 type PestañaAjustes = 'apariencia' | 'perfil' | 'admin';
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { backgroundColor, currency, setSettings, whatsappNumber, setWhatsappNumber } = useSettings();
+  const backgroundColor = useSettings((s) => s.backgroundColor);
+  const currency = useSettings((s) => s.currency);
+  const rates = useSettings((s) => s.rates);
+  const ratesUpdatedAt = useSettings((s) => s.ratesUpdatedAt);
+  const fetchRates = useSettings((s) => s.fetchRates);
+  const setSettings = useSettings((s) => s.setSettings);
+  const whatsappNumber = useSettings((s) => s.whatsappNumber);
+  const setWhatsappNumber = useSettings((s) => s.setWhatsappNumber);
+  const [refreshingRates, setRefreshingRates] = useState(false);
   const { user, role, username, avatarUrl, actualizarAvatar, subirAvatar, isAdmin, actualizarUsername } = useAuth();
   
   // Tab activa
@@ -25,12 +33,14 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [guardandoUser, setGuardandoUser] = useState(false);
   const [subiendoAvatar, setSubiendoAvatar] = useState(false);
 
-  // Estados Admin
-  const { productos, bulkUpdateStock, bulkCategoryDiscount } = useProductos();
+  // Estados Admin (selectores granulares sin disparar fetch redundante)
+  const productos = useProductosStore((s) => s.productos);
+  const bulkUpdateStock = useProductosStore((s) => s.bulkUpdateStock);
+  const bulkCategoryDiscount = useProductosStore((s) => s.bulkCategoryDiscount);
   const [catDiscounts, setCatDiscounts] = useState<Record<string, number | ''>>({});
   const [bulkLoading, setBulkLoading] = useState<string | null>(null);
 
-  const adminStats = (() => {
+  const adminStats = useMemo(() => {
     let total = 0, sinStock = 0, conDescuento = 0, valorTotal = 0;
     productos.forEach(p => {
       total++;
@@ -39,7 +49,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       valorTotal += p.precio * (p.stock ?? 10) * (1 - (p.descuento ?? 0) / 100);
     });
     return { total, sinStock, conDescuento, valorTotal: Math.round(valorTotal) };
-  })();
+  }, [productos]);
 
   const handleAgotarTodo = async () => {
     if (!confirm('¿Estás seguro de que quieres poner en 0 el stock de TODOS los productos?')) return;
@@ -302,7 +312,23 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </section>
 
               <section className="border-t border-themeBorder/40 pt-5">
-                <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Moneda Principal</h3>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-xs font-black text-themeText uppercase tracking-widest">Moneda Principal</h3>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setRefreshingRates(true);
+                      await fetchRates(true);
+                      setRefreshingRates(false);
+                      toast.success('Tasas de cambio actualizadas al valor del día');
+                    }}
+                    disabled={refreshingRates}
+                    className="flex items-center gap-1 text-[10px] font-bold text-themeAccent hover:underline disabled:opacity-50"
+                  >
+                    <RefreshCw size={11} className={refreshingRates ? 'animate-spin' : ''} />
+                    Actualizar tasa
+                  </button>
+                </div>
                 <div className="flex gap-2">
                   {['COP', 'USD', 'MXN'].map((moneda) => (
                     <button
@@ -313,6 +339,21 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       {moneda}
                     </button>
                   ))}
+                </div>
+                <div className="mt-2.5 p-2.5 rounded-xl bg-themeInput/30 border border-themeBorder/50 text-[10px] text-themeTextMuted space-y-1">
+                  <div className="flex justify-between">
+                    <span>1 USD ≈</span>
+                    <span className="font-bold text-themeText">{Math.round(1 / rates.USD).toLocaleString('es-CO')} COP</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>1 MXN ≈</span>
+                    <span className="font-bold text-themeText">{Math.round(1 / rates.MXN).toLocaleString('es-CO')} COP</span>
+                  </div>
+                  {ratesUpdatedAt > 0 && (
+                    <p className="text-[9px] opacity-75 pt-1 border-t border-themeBorder/30">
+                      Sincronizado: {new Date(ratesUpdatedAt).toLocaleString('es-CO')}
+                    </p>
+                  )}
                 </div>
                 <p className="text-[10px] text-themeTextMuted mt-2 leading-relaxed">
                   Los valores del catálogo se convertirán de manera automatizada utilizando tasas de cambio sincronizadas del día.

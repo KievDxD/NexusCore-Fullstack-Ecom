@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useProductos } from '../hooks/useProductos';
+import { fetchProductoDetalle, invalidateProductoDetalleCache } from '../hooks/useProductos';
 import { useCarritoStore } from '../hooks/useCarrito';
 import type { Producto } from '../types';
 import { useSettings } from '../hooks/useSettings';
@@ -10,7 +10,8 @@ import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
 import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import AdminProductoModal from '../components/AdminProductoModal';
+
+const AdminProductoModal = lazy(() => import('../components/AdminProductoModal'));
 
 interface ReviewItem {
   id: number;
@@ -26,7 +27,6 @@ interface ReviewItem {
 export default function PaginaProducto() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { fetchProductoById } = useProductos();
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
@@ -94,14 +94,14 @@ export default function PaginaProducto() {
     setModalZoomPos({ x: 50, y: 50 });
   };
 
-  const cargarDetalles = useCallback(async () => {
+  const cargarDetalles = useCallback(async (force = false) => {
     if (!id) return;
     setCargando(true);
 
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
 
     try {
-      const res = await Promise.race([fetchProductoById(Number(id)), timeout]);
+      const res = await Promise.race([fetchProductoDetalle(Number(id), force), timeout]);
       if (res && res.producto) {
         setProducto(res.producto);
         setResenas(res.resenas || []);
@@ -121,7 +121,7 @@ export default function PaginaProducto() {
       navigate('/');
     }
     setCargando(false);
-  }, [id, fetchProductoById, navigate]);
+  }, [id, navigate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -242,6 +242,7 @@ export default function PaginaProducto() {
       };
 
       setResenas(prev => [reviewAgregada, ...prev]);
+      invalidateProductoDetalleCache(producto.id);
       setNuevoComentario('');
       setNuevaPuntuacion(5);
       setHoverPuntuacion(0);
@@ -302,6 +303,10 @@ export default function PaginaProducto() {
             <img 
               src={imagenActiva} 
               alt={producto.nombre} 
+              width={800}
+              height={600}
+              fetchPriority="high"
+              decoding="async"
               style={{
                 transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
                 transform: isHovered ? 'scale(2.2)' : 'scale(1)'
@@ -342,7 +347,7 @@ export default function PaginaProducto() {
                   onClick={() => setImagenActiva(img.url)}
                   className={`relative w-20 aspect-[4/3] rounded-xl overflow-hidden border-2 transition-all flex-shrink-0 bg-themeInput/30 ${imagenActiva === img.url ? 'border-themeAccent shadow-sm scale-98' : 'border-themeBorder hover:border-themeAccent/40'}`}
                 >
-                  <img src={img.url} alt="Miniatura" className="w-full h-full object-cover" />
+                  <img src={img.url} alt="Miniatura" width={80} height={60} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
@@ -771,12 +776,19 @@ export default function PaginaProducto() {
         document.body
       )}
 
-      {/* Modal de administración */}
-      <AdminProductoModal 
-        isOpen={modalEditOpen} 
-        onClose={cargarDetalles} 
-        productoAEditar={producto}
-      />
+      {/* Modal de administración (solo se descarga si es admin) */}
+      {isAdmin && (
+        <Suspense fallback={null}>
+          <AdminProductoModal 
+            isOpen={modalEditOpen} 
+            onClose={() => {
+              setModalEditOpen(false);
+              void cargarDetalles(true);
+            }} 
+            productoAEditar={producto}
+          />
+        </Suspense>
+      )}
 
     </div>
   );

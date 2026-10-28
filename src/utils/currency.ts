@@ -20,21 +20,28 @@ export const precioConDescuento = (p: Pick<Producto, 'precio' | 'descuento'>): n
 
 /**
  * Convierte un precio base en COP a la moneda seleccionada usando las tasas de la API
+ * con redondeo de precisión financiera (2 decimales para USD/MXN, entero para COP).
  */
 export const convertPrice = (
   priceInCOP: number,
   targetCurrency: Moneda,
   rates: { USD: number; MXN: number }
-) => {
-  if (targetCurrency === 'USD') return priceInCOP * rates.USD;
-  if (targetCurrency === 'MXN') return priceInCOP * rates.MXN;
-  return priceInCOP;
+): number => {
+  if (targetCurrency === 'USD') {
+    const raw = priceInCOP * (rates.USD || 0.000238);
+    return Math.round((raw + Number.EPSILON) * 100) / 100;
+  }
+  if (targetCurrency === 'MXN') {
+    const raw = priceInCOP * (rates.MXN || 0.00476);
+    return Math.round((raw + Number.EPSILON) * 100) / 100;
+  }
+  return Math.round(priceInCOP);
 };
 
 /**
  * Formatea un número como moneda profesional (puntos, comas y símbolos)
  */
-export const formatCurrency = (amount: number, currency: Moneda) => {
+export const formatCurrency = (amount: number, currency: Moneda): string => {
   let formatter = formatters.get(currency);
   if (!formatter) {
     const config = CURRENCY_CONFIG[currency];
@@ -42,6 +49,7 @@ export const formatCurrency = (amount: number, currency: Moneda) => {
       style: 'currency',
       currency: config.symbol,
       minimumFractionDigits: currency === 'COP' ? 0 : 2,
+      maximumFractionDigits: currency === 'COP' ? 0 : 2,
     });
     formatters.set(currency, formatter);
   }

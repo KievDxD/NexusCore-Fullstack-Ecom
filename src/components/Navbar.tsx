@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarritoCount } from '../hooks/useCarrito';
 import { useSettings, type Moneda } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { ShoppingCart, Settings, Globe, User, LogOut } from 'lucide-react';
-import SettingsModal from './SettingsModal';
 import { toast } from 'sonner';
+
+const SettingsModal = lazy(() => import('./SettingsModal'));
 
 interface NavbarProps {
   onAbrirCarrito: () => void;
@@ -130,10 +131,12 @@ export default function Navbar({ onAbrirCarrito }: NavbarProps) {
         </div>
       </nav>
 
-      <SettingsModal 
-        isOpen={ajustesAbiertos} 
-        onClose={() => setAjustesAbiertos(false)} 
-      />
+      <Suspense fallback={null}>
+        <SettingsModal 
+          isOpen={ajustesAbiertos} 
+          onClose={() => setAjustesAbiertos(false)} 
+        />
+      </Suspense>
     </>
   );
 }
