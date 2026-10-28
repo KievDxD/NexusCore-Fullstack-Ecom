@@ -7,7 +7,8 @@ import { getDiscountBadgeStyle } from "../utils/discount";
 import "./TarjetaProducto.css";
 import { toast } from "sonner";
 import type { Producto } from "../types";
-import { Pencil, Cpu } from "lucide-react";
+import { Pencil, Cpu, Scale } from "lucide-react";
+import { useComparadorStore } from "../hooks/useComparador";
 
 interface TarjetaProductoProps {
   producto: Producto;
@@ -19,6 +20,8 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   // Selectores granulares: la tarjeta solo se re-renderiza si cambia la cantidad de ESTE producto
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
   const enCarrito = useCantidadEnCarrito(producto.id);
+  const enComparador = useComparadorStore((s) => s.items.some((i) => i.id === producto.id));
+  const toggleComparar = useComparadorStore((s) => s.toggleComparar);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
 
@@ -118,20 +121,40 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
 
   return (
     <div className="product-card group relative">
-      {/* Botón flotante de edición para administradores */}
-      {isAdmin && (
+      {/* Botones flotantes superiores derechos: Comparar + Editar (Admin) */}
+      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
         <button
+          type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onEditar?.(producto);
+            toggleComparar(producto);
           }}
-          className="absolute top-3 right-3 bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl z-10 shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
-          title="Editar Hardware"
+          className={`p-2 rounded-xl shadow-lg border transition-all active:scale-95 flex items-center justify-center cursor-pointer ${
+            enComparador
+              ? "bg-emerald-500 text-white border-emerald-400"
+              : "bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white border-themeBorder/80 hover:border-themeAccent"
+          }`}
+          title={enComparador ? "Quitar del comparador" : "Comparar especificaciones"}
         >
-          <Pencil size={13} />
+          <Scale size={13} />
         </button>
-      )}
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onEditar?.(producto);
+            }}
+            className="bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white p-2 rounded-xl shadow-lg border border-themeBorder/80 hover:border-themeAccent transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            title="Editar Hardware"
+          >
+            <Pencil size={13} />
+          </button>
+        )}
+      </div>
 
       {/* Badges de inventario y descuento progresivo premium */}
       <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">

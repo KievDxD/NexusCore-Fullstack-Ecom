@@ -1,9 +1,53 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { type User } from '@supabase/supabase-js'; // El tipo oficial de Supabase
+import { type User } from '@supabase/supabase-js';
 import { toast } from 'sonner';
 
 type Role = 'admin' | 'usuario';
+
+interface CachedProfile {
+  userId: string;
+  role: Role;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
+const PROFILE_STORAGE_KEY = 'nexus_auth_profile_v1';
+
+function loadCachedProfile(): CachedProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedProfile>;
+    if (
+      parsed &&
+      typeof parsed.userId === 'string' &&
+      (parsed.role === 'admin' || parsed.role === 'usuario')
+    ) {
+      return {
+        userId: parsed.userId,
+        role: parsed.role,
+        username: parsed.username ?? null,
+        avatarUrl: parsed.avatarUrl ?? null,
+      };
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function saveCachedProfile(profile: CachedProfile | null) {
+  try {
+    if (!profile) {
+      localStorage.removeItem(PROFILE_STORAGE_KEY);
+    } else {
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 interface AuthContextType {
   user: User | null;
@@ -17,7 +61,7 @@ interface AuthContextType {
   actualizarAvatar: (nuevoAvatarUrl: string) => Promise<void>;
   subirAvatar: (file: File) => Promise<string>;
   logout: () => Promise<void>;
-  cargando: boolean; // Para evitar que la pantalla parpadee mientras valida
+  cargando: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,10 +75,12 @@ const errorMessage = (err: unknown): string =>
 const SESSION_REJECTED_STATUS = [401, 403, 404];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const initialCached = useMemo(() => loadCachedProfile(), []);
+
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<Role | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [role, setRole] = useState<Role | null>(initialCached?.role ?? null);
+  const [username, setUsername] = useState<string | null>(initialCached?.username ?? null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(initialCached?.avatarUrl ?? null);
   const [cargando, setCargando] = useState(true);
 
   // Evita cargas de perfil duplicadas para el mismo usuario (login + onAuthStateChange)
@@ -44,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(null);
     setUsername(null);
     setAvatarUrl(null);
+    saveCachedProfile(null);
   }, []);
 
   const fetchProfile = useCallback((userId: string, email?: string): Promise<void> => {
@@ -59,14 +106,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle();
 
         if (error || !data) {
-          if (error) console.warn('Error al obtener perfil, usando valores por defecto:', error.message);
-          setRole((prev) => prev || 'usuario');
-          setUsername((prev) => prev || (email ? email.split('@')[0] : 'usuario'));
-          setAvatarUrl((prev) => prev || avatarPorDefecto(userId));
+          if (error) console.warn('Error al obtener perfil, conservando caché o valores por defecto:', error.message);
+          const cached = loadCachedProfile();
+          const fallbackRole: Role = cached?.userId === userId ? cached.role : 'usuario';
+          const fallbackUsername =
+            (cached?.userId === userId ? cached.username : null) || (email ? email.split('@')[0] : 'usuario');
+          const fallbackAvatar =
+            (cached?.userId === userId ? cached.avatarUrl : null) || avatarPorDefecto(userId);
+
+          setRole(fallbackRole);
+          setUsername(fallbackUsername);
+          setAvatarUrl(fallbackAvatar);
+          saveCachedProfile({
+            userId,
+            role: fallbackRole,
+            username: fallbackUsername,
+            avatarUrl: fallbackAvatar,
+          });
         } else {
-          setRole(isRole(data.role) ? data.role : 'usuario');
+          const resolvedRole: Role = isRole(data.role) ? data.role : 'usuario';
+          setRole(resolvedRole);
           setUsername(data.username);
           setAvatarUrl(data.avatar_url);
+          saveCachedProfile({
+            userId,
+            role: resolvedRole,
+            username: data.username,
+            avatarUrl: data.avatar_url,
+          });
         }
       } catch (err) {
         console.error('Error inesperado al cargar perfil:', err);
@@ -83,42 +150,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    // IMPORTANTE: el callback de onAuthStateChange NO debe hacer `await` de llamadas al cliente de
-    // Supabase (riesgo de deadlock). Se actualiza el estado de forma síncrona y el trabajo de red se difiere.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
 
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setCargando(false);
 
       if (!currentUser) {
         limpiarPerfil();
+        setCargando(false);
         return;
       }
 
-      // Un refresco de token no cambia el perfil
-      if (event === 'TOKEN_REFRESHED') return;
+      // Hidratar inmediatamente desde caché si coincide el userId para evitar cualquier parpadeo al pulsar F5
+      const cached = loadCachedProfile();
+      if (cached && cached.userId === currentUser.id) {
+        setRole(cached.role);
+        setUsername(cached.username);
+        setAvatarUrl(cached.avatarUrl);
+        setCargando(false);
+      }
+
+      if (event === 'TOKEN_REFRESHED') {
+        setCargando(false);
+        return;
+      }
 
       setTimeout(async () => {
         if (!active) return;
 
-        // Al restaurar sesión, validar contra el servidor sin cerrar sesión ante simples fallos de red
         if (event === 'INITIAL_SESSION') {
           const { error } = await supabase.auth.getUser();
           if (!active) return;
           if (error && 'status' in error && typeof error.status === 'number' && SESSION_REJECTED_STATUS.includes(error.status)) {
             console.warn('Sesión inválida o usuario eliminado del servidor. Cerrando sesión local:', error.message);
             await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
-            return; // SIGNED_OUT limpiará el estado
+            if (active) setCargando(false);
+            return;
           }
         }
 
         await fetchProfile(currentUser.id, currentUser.email);
+        if (active) setCargando(false);
       }, 0);
     });
 
-    // Salvaguarda contra pantallas de carga infinitas (forma funcional: sin closure obsoleto)
     const timeoutId = setTimeout(() => {
       if (active) setCargando(false);
     }, 4500);
@@ -132,13 +208,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (emailOrUsername: string, pass: string) => {
     let identifier = emailOrUsername.trim();
-    // Quitar @ si el usuario lo ingresó al inicio del username
     if (identifier.startsWith('@')) {
       identifier = identifier.substring(1);
     }
     let resolvedEmail = identifier;
 
-    // Si no contiene un '@', asumimos que es un username y buscamos su email
     if (!identifier.includes('@')) {
       const { data: email, error: rpcError } = await supabase.rpc('get_email_by_username', {
         username_to_find: identifier,
@@ -162,7 +236,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
     setUser(data.user);
     if (data.user) {
-      // Comparte la promesa en curso con onAuthStateChange: una sola consulta
       await fetchProfile(data.user.id, data.user.email);
     }
   }, [fetchProfile]);
@@ -171,7 +244,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const cleanUsername = usernameStr.trim();
     const cleanEmail = email.trim().toLowerCase();
 
-    // ── Validaciones de formato en cliente ──────────────────────────────
     if (cleanUsername.length < 3) {
       toast.error('El nombre de usuario debe tener al menos 3 caracteres.');
       throw new Error('El nombre de usuario debe tener al menos 3 caracteres.');
@@ -183,7 +255,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Formato de correo electrónico inválido.');
     }
 
-    // 1. Pre-validar en base de datos usando la RPC unificada
     const { data: checkData, error: checkError } = await supabase.rpc('check_user_exists', {
       email_to_check: cleanEmail,
       username_to_check: cleanUsername,
@@ -201,7 +272,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Ejecutar registro de Supabase con manejo explícito de errores
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
       password: pass,
@@ -222,23 +292,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
 
-    // Si se crea inmediatamente la sesión (confirmación por correo deshabilitada)
     if (data.session && data.user) {
       setUser(data.user);
       setRole('usuario');
       setUsername(cleanUsername);
       setAvatarUrl(avatarPorDefecto(data.user.id));
-
-      // Sincronizar el perfil real desde la base de datos (creado por el trigger)
       await fetchProfile(data.user.id, data.user.email);
       return true;
     }
 
-    return false; // Requiere confirmación de correo
+    return false;
   }, [fetchProfile]);
 
-  // Se usa UPDATE (no upsert) y NUNCA se envían role/email desde el cliente:
-  // el perfil lo crea el trigger handle_new_user y el rol solo lo puede cambiar un administrador de BD.
   const actualizarUsername = useCallback(async (nuevoUsername: string) => {
     if (!user) throw new Error('No hay sesión activa.');
     const cleanUsername = nuevoUsername.trim();
@@ -248,7 +313,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      // Si solo cambian mayúsculas/minúsculas no hace falta comprobar duplicados
       if (cleanUsername.toLowerCase() !== username?.toLowerCase()) {
         const { data: existente } = await supabase
           .from('profiles')
@@ -266,11 +330,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
 
       setUsername(cleanUsername);
+      if (role) {
+        saveCachedProfile({ userId: user.id, role, username: cleanUsername, avatarUrl });
+      }
     } catch (err) {
       console.error('Error al actualizar username:', err);
       throw new Error(errorMessage(err), { cause: err });
     }
-  }, [user, username]);
+  }, [user, username, role, avatarUrl]);
 
   const actualizarAvatar = useCallback(async (nuevoAvatarUrl: string) => {
     if (!user) throw new Error('No hay sesión activa.');
@@ -279,11 +346,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.from('profiles').update({ avatar_url: nuevoAvatarUrl }).eq('id', user.id);
       if (error) throw error;
       setAvatarUrl(nuevoAvatarUrl);
+      if (role) {
+        saveCachedProfile({ userId: user.id, role, username, avatarUrl: nuevoAvatarUrl });
+      }
     } catch (err) {
       console.error('Error al actualizar avatar:', err);
       throw new Error(errorMessage(err), { cause: err });
     }
-  }, [user]);
+  }, [user, role, username]);
 
   const subirAvatar = useCallback(async (file: File): Promise<string> => {
     if (!user) throw new Error('No hay sesión activa.');
@@ -310,12 +380,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, actualizarAvatar]);
 
   const logout = useCallback(async () => {
-    // Limpieza síncrona de la UI
     setUser(null);
     limpiarPerfil();
 
-    // Cierra solo ESTE dispositivo (antes 'global' cerraba sesión en todos sin avisar).
-    // signOut ya elimina la sesión persistida: no hace falta purgar localStorage a mano.
     try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch (e) {
@@ -325,7 +392,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isAdmin = role === 'admin';
 
-  // value memoizado: los consumidores solo se re-renderizan si algo realmente cambió
   const value = useMemo<AuthContextType>(
     () => ({
       user, role, username, avatarUrl, isAdmin,

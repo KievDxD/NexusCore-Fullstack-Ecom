@@ -15,6 +15,7 @@ const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
 const PaginaProducto = lazy(() => import('./pages/PaginaProducto'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const ComparadorModal = lazy(() => import('./components/ComparadorModal'));
 
 // Fallback de carga para Suspense
 function LoadingFallback() {
@@ -116,11 +117,14 @@ export default function App() {
             </Routes>
           </Suspense>
 
-          {/* 🛒 El carrito también es global */}
+          {/* 🛒 El carrito y el comparador lado a lado son globales */}
           <CarritoSidebar 
             isOpen={carritoAbierto} 
             onClose={() => setCarritoAbierto(false)} 
-          /> 
+          />
+          <Suspense fallback={null}>
+            <ComparadorModal />
+          </Suspense>
         </div>
       </BrowserRouter>
     </AuthProvider>

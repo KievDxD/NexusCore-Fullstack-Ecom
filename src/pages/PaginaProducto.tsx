@@ -9,8 +9,9 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
 import { getDiscountBadgeStyle } from '../utils/discount';
-import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil, Cpu } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil, Cpu, Scale } from 'lucide-react';
 import { toast } from 'sonner';
+import { useComparadorStore } from '../hooks/useComparador';
 
 const AdminProductoModal = lazy(() => import('../components/AdminProductoModal'));
 
@@ -30,6 +31,8 @@ export default function PaginaProducto() {
   const navigate = useNavigate();
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
   const enCarrito = useCantidadEnCarrito(Number(id));
+  const enComparador = useComparadorStore((s) => s.items.some((i) => i.id === Number(id)));
+  const toggleComparar = useComparadorStore((s) => s.toggleComparar);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
   const { user, username, avatarUrl, isAdmin } = useAuth();
@@ -446,19 +449,33 @@ export default function PaginaProducto() {
         {/* 📝 SECCIÓN DERECHA: INFORMACIÓN Y ACCIONES */}
         <div className="md:col-span-6 space-y-6">
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="inline-block px-3 py-1 bg-themeAccent/10 border border-themeAccent/20 text-themeAccent text-[9px] font-black uppercase tracking-widest rounded-full">
                 {producto.marca || 'NEXUS'}
               </span>
-              {isAdmin && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setModalEditOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-themeAccent/10 border border-themeAccent/20 hover:bg-themeAccent hover:text-white text-themeAccent text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer"
+                  type="button"
+                  onClick={() => toggleComparar(producto)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer ${
+                    enComparador
+                      ? 'bg-emerald-500 border-emerald-400 text-white'
+                      : 'bg-themeInput border-themeBorder hover:border-themeAccent text-themeTextMuted hover:text-themeText'
+                  }`}
                 >
-                  <Pencil size={11} />
-                  Editar Hardware
+                  <Scale size={11} />
+                  {enComparador ? 'En Comparador' : 'Comparar'}
                 </button>
-              )}
+                {isAdmin && (
+                  <button
+                    onClick={() => setModalEditOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-themeAccent/10 border border-themeAccent/20 hover:bg-themeAccent hover:text-white text-themeAccent text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Pencil size={11} />
+                    Editar Hardware
+                  </button>
+                )}
+              </div>
             </div>
             <h1 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">
               {producto.nombre}

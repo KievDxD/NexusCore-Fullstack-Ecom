@@ -1,0 +1,58 @@
+name: Supabase Keep-Alive & TypeScript Build CI
+
+on:
+  schedule:
+    # Se ejecuta automáticamente cada 3 días a las 08:00 UTC para evitar que Supabase pause el proyecto gratuito
+    - cron: '0 8 */3 * *'
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build_and_keepalive:
+    name: Verificar Build TypeScript y Ping Supabase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar Linter y Build de Producción (Validación TypeScript para Vercel)
+        run: |
+          npm run lint
+          npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'public-anon-placeholder' }}
+
+      - name: Keep-Alive Ping a Supabase (SELECT count(*) FROM productos)
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "Secrets no configurados en GitHub Secrets; omitiendo ping de keep-alive."
+            exit 0
+          fi
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/productos?select=id&limit=1" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Prefer: count=exact")
+          echo "Supabase Keep-Alive HTTP Status: $RESPONSE"
+          if [ "$RESPONSE" -ge 400 ]; then
+            echo "Error al contactar Supabase Keep-Alive: HTTP $RESPONSE"
+            exit 1
+          fi
+

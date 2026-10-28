@@ -49,3 +49,37 @@ export interface Resena {
   profiles?: ResenaPerfil | null;
 }
 
+export type EstadoPedido = 'pendiente' | 'pagado' | 'cancelado';
+export type MetodoPago = 'whatsapp' | 'wompi';
+
+export interface PedidoItem {
+  producto_id: number;
+  nombre: string;
+  cantidad: number;
+  precio_unitario: number;
+  imagen?: string;
+}
+
+export interface Pedido {
+  id: string;
+  user_id?: string | null;
+  cliente_nombre: string;
+  cliente_telefono: string;
+  metodo_pago: MetodoPago;
+  moneda: Moneda;
+  total: number;
+  estado: EstadoPedido;
+  referencia_pago?: string | null;
+  items: PedidoItem[];
+  created_at: string;
+}
+
+export type PCBuilderSlot =
+  | 'cpu'
+  | 'board'
+  | 'ram'
+  | 'gpu'
+  | 'storage'
+  | 'case'
+  | 'cooler'
+  | 'psu';
