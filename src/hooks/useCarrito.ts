@@ -12,38 +12,45 @@ const STOCK_POR_DEFECTO = 10;
 
 interface CarritoState {
   items: CartItemPersisted[];
-  agregarProducto: (producto: Producto, cantidad?: number) => void;
+  /** Devuelve `true` si se añadió al menos una unidad; `false` si el stock ya estaba agotado. */
+  agregarProducto: (producto: Producto, cantidad?: number) => boolean;
   eliminarProducto: (id: number) => void;
   limpiarCarrito: () => void;
   sincronizarConCatalogo: (catalogo: Producto[]) => void;
 }
 
+export const MENSAJE_LIMITE_STOCK = 'Has alcanzado el límite de stock disponible para este producto';
+
+const stockFresco = (producto: Producto): number => {
+  const fresco = useProductosStore.getState().productos.find((p) => p.id === producto.id) ?? producto;
+  return fresco.stock ?? STOCK_POR_DEFECTO;
+};
+
 export const useCarritoStore = create<CarritoState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       items: [],
 
-      agregarProducto: (producto, cantidad = 1) =>
-        set((state) => {
-          if (cantidad <= 0) return state;
+      agregarProducto: (producto, cantidad = 1) => {
+        if (cantidad <= 0) return false;
 
-          // Stock más fresco desde el catálogo global
-          const fresco = useProductosStore.getState().productos.find((p) => p.id === producto.id) ?? producto;
-          const stock = fresco.stock ?? STOCK_POR_DEFECTO;
+        const stock = stockFresco(producto);
+        const actual = get().items.find((i) => i.id === producto.id);
+        const cantidadActual = actual?.cantidad ?? 0;
 
-          const actual = state.items.find((i) => i.id === producto.id);
-          const cantidadActual = actual?.cantidad ?? 0;
-          // Nunca superar el stock disponible
-          const nuevaCantidad = Math.min(cantidadActual + cantidad, stock);
+        // Guardián: si ya se alcanzó el stock no se toca el estado (evita re-renders y bucles)
+        if (cantidadActual >= stock) return false;
 
-          if (nuevaCantidad <= cantidadActual) return state; // sin stock restante: no cambia nada
+        // Nunca superar el stock disponible
+        const nuevaCantidad = Math.min(cantidadActual + cantidad, stock);
 
-          return {
-            items: actual
-              ? state.items.map((i) => (i.id === producto.id ? { id: i.id, cantidad: nuevaCantidad } : i))
-              : [...state.items, { id: producto.id, cantidad: nuevaCantidad }],
-          };
-        }),
+        set((state) => ({
+          items: actual
+            ? state.items.map((i) => (i.id === producto.id ? { id: i.id, cantidad: nuevaCantidad } : i))
+            : [...state.items, { id: producto.id, cantidad: nuevaCantidad }],
+        }));
+        return true;
+      },
 
       eliminarProducto: (id) => set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
 
@@ -100,6 +107,10 @@ const placeholderPendiente = (item: CartItemPersisted): CartItem => ({
 /** Total de unidades en el carrito (primitivo: el Navbar solo re-renderiza si cambia el número). */
 export const useCarritoCount = () =>
   useCarritoStore((s) => s.items.reduce((sum, i) => sum + i.cantidad, 0));
+
+/** Unidades de un producto ya en el carrito (primitivo: solo re-renderiza si cambia ESE producto). */
+export const useCantidadEnCarrito = (id: number) =>
+  useCarritoStore((s) => s.items.find((i) => i.id === id)?.cantidad ?? 0);
 
 /** Solo las acciones: componentes como TarjetaProducto no se re-renderizan al cambiar el carrito. */
 export const useCarritoActions = () => {

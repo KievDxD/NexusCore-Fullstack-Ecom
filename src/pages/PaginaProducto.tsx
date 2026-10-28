@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { fetchProductoDetalle, invalidateProductoDetalleCache } from '../hooks/useProductos';
-import { useCarritoStore } from '../hooks/useCarrito';
+import { useCarritoStore, useCantidadEnCarrito, MENSAJE_LIMITE_STOCK } from '../hooks/useCarrito';
 import type { Producto } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
+import { getDiscountBadgeStyle } from '../utils/discount';
 import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -28,6 +29,7 @@ export default function PaginaProducto() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+  const enCarrito = useCantidadEnCarrito(Number(id));
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
   const { user, username, avatarUrl, isAdmin } = useAuth();
@@ -167,7 +169,8 @@ export default function PaginaProducto() {
 
   if (!producto) return null;
 
-  const tieneDescuento = (producto.descuento ?? 0) > 0;
+  const badge = getDiscountBadgeStyle(producto.descuento);
+  const tieneDescuento = badge.tier !== 'none';
   const precioOriginal = convertPrice(producto.precio, currency, rates);
   const precioFinal = tieneDescuento 
     ? convertPrice(precioConDescuento(producto), currency, rates)
@@ -178,6 +181,10 @@ export default function PaginaProducto() {
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
+  const restante = Math.max(stockDisponible - enCarrito, 0);
+  const limiteAlcanzado = !sinStock && enCarrito >= stockDisponible;
+  const bloqueado = sinStock || limiteAlcanzado;
+  const cantidadVisible = bloqueado ? 0 : Math.min(cantidad, restante);
 
   // Calcular puntuación promedio
   const totalPuntos = resenas.reduce((sum, res) => sum + res.puntuacion, 0);
@@ -185,8 +192,13 @@ export default function PaginaProducto() {
 
   const handleAgregar = () => {
     if (sinStock) return;
-    agregarProducto(producto, cantidad);
-    toast.success(`Añadido: ${cantidad}x ${producto.nombre} al carrito`);
+    // Guardián: no se toca el store si ya se alcanzó el stock
+    if (limiteAlcanzado || cantidadVisible <= 0 || !agregarProducto(producto, cantidadVisible)) {
+      toast.info(MENSAJE_LIMITE_STOCK);
+      return;
+    }
+    toast.success(`Añadido: ${cantidadVisible}x ${producto.nombre} al carrito`);
+    setCantidad(1);
     setEstaAgregando(true);
     setTimeout(() => setEstaAgregando(false), 1000);
   };
@@ -399,8 +411,8 @@ export default function PaginaProducto() {
                     <p className="text-sm text-themeTextMuted line-through opacity-70">
                       {precioOriginalFormateado}
                     </p>
-                    <span className="bg-gradient-to-r from-orange-500 via-red-500 to-orange-500 text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md shadow-orange-500/30 shadow-sm animate-gradient bg-[length:200%_auto] flex items-center gap-1">
-                      <span className="animate-pulse">🔥</span> AHORRAS {producto.descuento}%
+                    <span className={`text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-md flex items-center gap-1 ${badge.className}`}>
+                      {badge.showFire && <span className="animate-pulse">🔥</span>} AHORRAS {badge.percentage}%
                     </span>
                   </div>
                 )}
@@ -429,16 +441,18 @@ export default function PaginaProducto() {
               {/* Contador de unidades */}
               <div className="flex items-center justify-between border border-themeBorder rounded-xl bg-themeCard p-1 sm:w-32">
                 <button
-                  onClick={() => cantidad > 1 && setCantidad(cantidad - 1)}
-                  disabled={sinStock}
+                  onClick={() => cantidadVisible > 1 && setCantidad(cantidadVisible - 1)}
+                  disabled={bloqueado || cantidadVisible <= 1}
+                  aria-label="Disminuir cantidad"
                   className="px-3 py-1.5 font-bold hover:text-themeAccent disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   -
                 </button>
-                <span className="font-bold text-sm">{sinStock ? 0 : cantidad}</span>
+                <span className="font-bold text-sm">{cantidadVisible}</span>
                 <button
-                  onClick={() => cantidad < stockDisponible ? setCantidad(cantidad + 1) : toast.warning("Límite de stock")}
-                  disabled={sinStock}
+                  onClick={() => cantidadVisible < restante ? setCantidad(cantidadVisible + 1) : toast.warning(MENSAJE_LIMITE_STOCK)}
+                  disabled={bloqueado || cantidadVisible >= restante}
+                  aria-label="Aumentar cantidad"
                   className="px-3 py-1.5 font-bold hover:text-themeAccent disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   +
@@ -448,13 +462,18 @@ export default function PaginaProducto() {
               {/* Botón de compra */}
               <button
                 onClick={handleAgregar}
-                disabled={sinStock || estaAgregando}
-                className={`flex-1 flex items-center justify-center gap-2 font-black py-3 px-6 rounded-xl shadow-md transition-all active:scale-[0.98] ${sinStock ? 'bg-themeBorder text-themeTextMuted cursor-not-allowed' : estaAgregando ? 'bg-emerald-600 text-white' : 'bg-themeAccent hover:bg-themeAccentHover text-white shadow-themeAccent/15'}`}
+                disabled={bloqueado || estaAgregando}
+                className={`flex-1 flex items-center justify-center gap-2 font-black py-3 px-6 rounded-xl shadow-md transition-all active:scale-[0.98] ${bloqueado ? 'bg-themeBorder text-themeTextMuted cursor-not-allowed' : estaAgregando ? 'bg-emerald-600 text-white' : 'bg-themeAccent hover:bg-themeAccentHover text-white shadow-themeAccent/15'}`}
               >
                 <ShoppingCart size={18} />
-                {sinStock ? "Sin Stock disponible" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
+                {sinStock ? "Sin Stock disponible" : limiteAlcanzado ? "Stock máximo en carrito" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
               </button>
             </div>
+            {limiteAlcanzado && (
+              <p className="text-xs text-amber-500 font-bold" role="status">
+                {MENSAJE_LIMITE_STOCK} ({enCarrito} en el carrito).
+              </p>
+            )}
           </div>
 
           {/* Descripción corta */}

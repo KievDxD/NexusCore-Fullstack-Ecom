@@ -1,8 +1,9 @@
 import { useState, memo } from "react";
 import { Link } from "react-router-dom";
-import { useCarritoStore } from "../hooks/useCarrito";
+import { useCarritoStore, useCantidadEnCarrito, MENSAJE_LIMITE_STOCK } from "../hooks/useCarrito";
 import { useSettings } from "../hooks/useSettings";
 import { convertPrice, formatCurrency, precioConDescuento } from "../utils/currency";
+import { getDiscountBadgeStyle } from "../utils/discount";
 import "./TarjetaProducto.css";
 import { toast } from "sonner";
 import type { Producto } from "../types";
@@ -15,17 +16,19 @@ interface TarjetaProductoProps {
 }
 
 export default memo(function TarjetaProducto({ producto, isAdmin = false, onEditar }: TarjetaProductoProps) {
-  // Selectores granulares: la tarjeta no se re-renderiza cuando cambia el contenido del carrito
+  // Selectores granulares: la tarjeta solo se re-renderiza si cambia la cantidad de ESTE producto
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+  const enCarrito = useCantidadEnCarrito(producto.id);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
 
-  const tieneDescuento = (producto.descuento ?? 0) > 0;
+  const badge = getDiscountBadgeStyle(producto.descuento);
+  const tieneDescuento = badge.tier !== 'none';
   const precioOriginal = convertPrice(producto.precio, currency, rates);
-  const precioFinal = tieneDescuento 
+  const precioFinal = tieneDescuento
     ? convertPrice(precioConDescuento(producto), currency, rates)
     : precioOriginal;
-    
+
   const precioOriginalFormateado = formatCurrency(precioOriginal, currency);
   const precioFinalFormateado = formatCurrency(precioFinal, currency);
 
@@ -35,6 +38,11 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
 
   const stockDisponible = producto.stock ?? 10;
   const sinStock = stockDisponible === 0;
+  // Unidades que aún se pueden añadir teniendo en cuenta lo que ya está en el carrito
+  const restante = Math.max(stockDisponible - enCarrito, 0);
+  const limiteAlcanzado = !sinStock && enCarrito >= stockDisponible;
+  const bloqueado = sinStock || limiteAlcanzado;
+  const cantidadVisible = bloqueado ? 0 : Math.min(cantidad, restante);
 
   const dispararAnimacionNumero = () => {
     setAnimarNumero(true);
@@ -42,34 +50,44 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   };
 
   const aumentar = () => {
-    if (cantidad < stockDisponible) {
-      setCantidad(cantidad + 1);
+    if (cantidadVisible < restante) {
+      setCantidad(cantidadVisible + 1);
       dispararAnimacionNumero();
     } else {
       toast.warning("Límite de stock", {
-        description: `Solo hay ${stockDisponible} unidades disponibles.`
+        description: enCarrito > 0
+          ? `Ya tienes ${enCarrito} en el carrito. Solo puedes añadir ${restante} más.`
+          : `Solo hay ${stockDisponible} unidades disponibles.`,
       });
     }
   };
 
   const disminuir = () => {
-    if (cantidad > 1) {
-      setCantidad(cantidad - 1);
+    if (cantidadVisible > 1) {
+      setCantidad(cantidadVisible - 1);
       dispararAnimacionNumero();
     }
   };
 
   const handleAgregar = () => {
     if (sinStock) return;
-    
-    agregarProducto(producto, cantidad);
-    
-    toast.success(`Añadido: ${cantidad}x ${producto.nombre} al carrito`, {
+    // Guardián: no se toca el store si ya se alcanzó el stock
+    if (limiteAlcanzado || cantidadVisible <= 0) {
+      toast.info(MENSAJE_LIMITE_STOCK);
+      return;
+    }
+
+    if (!agregarProducto(producto, cantidadVisible)) {
+      toast.info(MENSAJE_LIMITE_STOCK);
+      return;
+    }
+
+    toast.success(`Añadido: ${cantidadVisible}x ${producto.nombre} al carrito`, {
       description: "¡Listo para cotizar en tu carrito!",
       duration: 2000,
     });
     setEstaAgregando(true);
-    setCantidad(1); 
+    setCantidad(1);
     setTimeout(() => setEstaAgregando(false), 1000);
   };
 
@@ -103,9 +121,9 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
           </span>
         )}
         {tieneDescuento && (
-          <span className="bg-gradient-to-r from-orange-500 via-red-500 to-orange-500 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg shadow-orange-500/30 shadow-lg backdrop-blur-md animate-gradient bg-[length:200%_auto] border border-white/20 flex items-center gap-1.5 self-start transition-transform hover:scale-110">
-            <span className="animate-pulse">🔥</span> 
-            <span>-{producto.descuento}%</span>
+          <span className={`text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-1.5 self-start transition-transform hover:scale-110 ${badge.className}`}>
+            {badge.showFire && <span className="animate-pulse">🔥</span>}
+            <span>-{badge.percentage}%</span>
           </span>
         )}
       </div>
@@ -114,9 +132,9 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
       <Link to={`/producto/${producto.id}`} className="block focus:outline-none">
         {/* Contenedor de Imagen */}
         <div className="product-card__image-wrapper overflow-hidden relative rounded-t-xl">
-          <img 
-            src={producto.imagen} 
-            alt={producto.nombre} 
+          <img
+            src={producto.imagen}
+            alt={producto.nombre}
             loading="lazy"
             decoding="async"
             width={600}
@@ -132,7 +150,7 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
             </span>
           </div>
         </div>
-        
+
         {/* Textos Informativos */}
         <div className="p-1">
           <span className="text-[9px] text-themeAccent font-bold uppercase tracking-wider block mb-1">
@@ -156,45 +174,53 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
         {/* CONTADOR DE CANTIDAD */}
         <div className="product-card__counter">
           <span className="product-card__counter-label">Cant.</span>
-          
+
           <div className="product-card__counter-controls">
-            <button 
+            <button
               onClick={disminuir}
-              disabled={sinStock}
-              className={`product-card__counter-btn ${sinStock ? 'opacity-30 cursor-not-allowed' : ''}`}
+              disabled={bloqueado || cantidadVisible <= 1}
+              aria-label="Disminuir cantidad"
+              className={`product-card__counter-btn ${bloqueado || cantidadVisible <= 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
             >
               -
             </button>
 
             <span className={`product-card__counter-value ${
               animarNumero ? "product-card__counter-value--animating" : ""
-            } ${sinStock ? 'opacity-30' : ''}`}>
-              {sinStock ? 0 : cantidad}
+            } ${bloqueado ? 'opacity-30' : ''}`}>
+              {cantidadVisible}
             </span>
 
-            <button 
+            <button
               onClick={aumentar}
-              disabled={sinStock}
-              className={`product-card__counter-btn ${sinStock ? 'opacity-30 cursor-not-allowed' : ''}`}
+              disabled={bloqueado || cantidadVisible >= restante}
+              aria-label="Aumentar cantidad"
+              className={`product-card__counter-btn ${bloqueado || cantidadVisible >= restante ? 'opacity-30 cursor-not-allowed' : ''}`}
             >
               +
             </button>
           </div>
         </div>
 
+        {limiteAlcanzado && (
+          <p className="text-[10px] text-amber-500 font-bold text-center leading-tight" role="status">
+            Límite alcanzado ({enCarrito} en el carrito)
+          </p>
+        )}
+
         {/* BOTÓN PRINCIPAL DE COMPRA */}
-        <button 
-          onClick={handleAgregar} 
-          disabled={estaAgregando || sinStock}
+        <button
+          onClick={handleAgregar}
+          disabled={estaAgregando || bloqueado}
           className={`product-card__submit-btn ${
-            sinStock 
+            bloqueado
               ? "bg-themeBorder text-themeTextMuted cursor-not-allowed opacity-50 border-none shadow-none"
-              : estaAgregando 
-                ? "product-card__submit-btn--adding" 
+              : estaAgregando
+                ? "product-card__submit-btn--adding"
                 : "product-card__submit-btn--idle"
           }`}
         >
-          {sinStock ? "Agotado" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
+          {sinStock ? "Agotado" : limiteAlcanzado ? "Stock máximo en carrito" : estaAgregando ? "¡Añadido! ✓" : "Agregar al carrito"}
         </button>
       </div>
       </div>
