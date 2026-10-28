@@ -2,38 +2,11 @@
 -- MIGRACIÓN DE RENDIMIENTO, ÍNDICES Y TRANSACCIONES RPC (IDEMPOTENTE)
 -- =====================================================================
 
--- 1. Optimización de Políticas RLS en storage.objects (Subqueries escalares InitPlan)
-drop policy if exists "Los usuarios pueden subir sus propios avatares" on storage.objects;
-drop policy if exists "Los usuarios pueden actualizar sus propios avatares" on storage.objects;
-drop policy if exists "Los usuarios pueden borrar sus propios avatares" on storage.objects;
-
-create policy "Los usuarios pueden subir sus propios avatares" on storage.objects
-  for insert with check (
-    bucket_id = 'avatars'
-    and (select auth.role()) = 'authenticated'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  );
-
-create policy "Los usuarios pueden actualizar sus propios avatares" on storage.objects
-  for update using (
-    bucket_id = 'avatars'
-    and (select auth.role()) = 'authenticated'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  );
-
-create policy "Los usuarios pueden borrar sus propios avatares" on storage.objects
-  for delete using (
-    bucket_id = 'avatars'
-    and (select auth.role()) = 'authenticated'
-    and (storage.foldername(name))[1] = (select auth.uid())::text
-  );
-
--- 2. Índices adicionales para ordenamiento, filtros frecuentes y búsqueda
+-- 1. Índices adicionales para ordenamiento, filtros frecuentes y búsqueda
 create index if not exists productos_stock_id_idx on public.productos ((coalesce(stock, 10) = 0), id);
 create index if not exists productos_marca_idx on public.productos (marca);
-create index if not exists auth_users_email_lower_idx on auth.users (lower(email));
 
--- 3. RPC Transaccional: Obtener detalle completo de producto + galería + reseñas en 1 solo viaje de red
+-- 2. RPC Transaccional: Obtener detalle completo de producto + galería + reseñas en 1 solo viaje de red
 create or replace function public.get_producto_detalle(p_id bigint)
 returns jsonb
 language plpgsql
