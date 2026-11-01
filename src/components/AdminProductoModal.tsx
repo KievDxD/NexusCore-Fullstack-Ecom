@@ -39,6 +39,42 @@ interface StagedImage {
 
 type ModalTab = 'general' | 'ficha' | 'galeria';
 
+const OPCIONES_CATEGORIA: Record<'Componentes' | 'Periféricos', { value: string; label: string }[]> = {
+  Componentes: [
+    { value: 'Procesadores (CPU)', label: 'Procesadores (CPU)' },
+    { value: 'Tarjetas Gráficas (GPU)', label: 'Tarjetas Gráficas (GPU)' },
+    { value: 'Memorias RAM', label: 'Memorias RAM' },
+    { value: 'Almacenamiento (SSD/HDD)', label: 'Almacenamiento (SSD/HDD)' },
+    { value: 'Tarjetas Madre (Board)', label: 'Tarjetas Madre (Board)' },
+    { value: 'Fuentes de Poder (PSU)', label: 'Fuentes de Poder (PSU)' },
+    { value: 'Gabinetes (Chasis)', label: 'Gabinetes (Chasis)' },
+    { value: 'Refrigeración (Coolers)', label: 'Refrigeración (Coolers)' },
+    { value: 'Componentes', label: 'Otros Componentes' },
+  ],
+  Periféricos: [
+    { value: 'Teclados', label: 'Teclados' },
+    { value: 'Mouses / Ratones', label: 'Mouses / Ratones' },
+    { value: 'Monitores', label: 'Monitores' },
+    { value: 'Audio / Auriculares', label: 'Audio / Auriculares' },
+    { value: 'Periféricos', label: 'Otros Periféricos' },
+  ],
+};
+
+function esPeriferico(cat: string): boolean {
+  const c = (cat || '').toLowerCase();
+  return (
+    c.includes('periférico') ||
+    c.includes('periferico') ||
+    c.includes('teclado') ||
+    c.includes('mouse') ||
+    c.includes('ratón') ||
+    c.includes('raton') ||
+    c.includes('monitor') ||
+    c.includes('audio') ||
+    c.includes('auricular')
+  );
+}
+
 export default function AdminProductoModal({ isOpen, onClose, productoAEditar }: AdminProductoModalProps) {
   const agregarProductoStore = useProductosStore((s) => s.agregarProductoStore);
   const actualizarProductoStore = useProductosStore((s) => s.actualizarProductoStore);
@@ -55,7 +91,8 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
   const [precio, setPrecio] = useState<number | ''>('');
   const [imagen, setImagen] = useState('');
   const [imagenPrincipalMarcadaEliminar, setImagenPrincipalMarcadaEliminar] = useState(false);
-  const [categoria, setCategoria] = useState('Componentes');
+  const [categoria, setCategoria] = useState('Procesadores (CPU)');
+  const [grupoCategoria, setGrupoCategoria] = useState<'Componentes' | 'Periféricos'>('Componentes');
   const [marca, setMarca] = useState('');
   const [stock, setStock] = useState<number | ''>(10);
   const [descuento, setDescuento] = useState<number | ''>(0);
@@ -112,7 +149,9 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
       setNombre(productoAEditar.nombre || '');
       setPrecio(productoAEditar.precio || 0);
       setImagen(imgPrincipal);
-      setCategoria(productoAEditar.categoria || 'Componentes');
+      const catInicial = productoAEditar.categoria || 'Procesadores (CPU)';
+      setCategoria(catInicial);
+      setGrupoCategoria(esPeriferico(catInicial) ? 'Periféricos' : 'Componentes');
       setMarca(productoAEditar.marca || '');
       setStock(productoAEditar.stock ?? 10);
       setDescuento(productoAEditar.descuento ?? 0);
@@ -157,7 +196,8 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
       setNombre('');
       setPrecio('');
       setImagen('');
-      setCategoria('Componentes');
+      setCategoria('Procesadores (CPU)');
+      setGrupoCategoria('Componentes');
       setMarca('');
       setStock(10);
       setDescuento(0);
@@ -493,7 +533,7 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
               {/* Identificación: Nombre, Marca, Categoría */}
               <div className="w-full max-w-full box-border bg-themeCard p-3.5 sm:p-4 rounded-2xl border border-themeBorder/50 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full max-w-full box-border">
-                  <div className="md:col-span-6 min-w-0">
+                  <div className="md:col-span-8 min-w-0">
                     <label className="block text-[10px] font-black text-themeTextMuted uppercase tracking-wider mb-1">
                       Nombre Comercial *
                     </label>
@@ -507,7 +547,7 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
                     />
                   </div>
 
-                  <div className="md:col-span-3 min-w-0">
+                  <div className="md:col-span-4 min-w-0">
                     <label className="block text-[10px] font-black text-themeTextMuted uppercase tracking-wider mb-1">
                       Marca *
                     </label>
@@ -520,35 +560,70 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
                       className="w-full max-w-full box-border px-3.5 py-2.5 bg-themeInput border border-themeBorder/60 rounded-xl text-themeText text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-themeAccent/40"
                     />
                   </div>
+                </div>
 
-                  <div className="md:col-span-3 min-w-0">
-                    <label className="block text-[10px] font-black text-themeTextMuted uppercase tracking-wider mb-1">
-                      Categoría *
+                {/* Categorización Organizada y Jerárquica */}
+                <div className="p-3 bg-themeInput/25 border border-themeBorder/60 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-themeTextMuted uppercase tracking-wider flex items-center gap-1.5">
+                      <Tag size={12} className="text-themeAccent" /> Categoría del Producto *
                     </label>
-                    <select
-                      value={categoria}
-                      onChange={(e) => setCategoria(e.target.value)}
-                      className="w-full max-w-full box-border px-3.5 py-2.5 bg-themeInput border border-themeBorder/60 rounded-xl text-themeText text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-themeAccent/40"
-                    >
-                      <optgroup label="Componentes">
-                        <option value="Procesadores (CPU)">Procesadores (CPU)</option>
-                        <option value="Tarjetas Gráficas (GPU)">Tarjetas Gráficas (GPU)</option>
-                        <option value="Memorias RAM">Memorias RAM</option>
-                        <option value="Almacenamiento (SSD/HDD)">Almacenamiento (SSD/HDD)</option>
-                        <option value="Tarjetas Madre (Board)">Tarjetas Madre (Board)</option>
-                        <option value="Fuentes de Poder (PSU)">Fuentes de Poder (PSU)</option>
-                        <option value="Gabinetes (Chasis)">Gabinetes (Chasis)</option>
-                        <option value="Refrigeración (Coolers)">Refrigeración (Coolers)</option>
-                        <option value="Componentes">Otros Componentes</option>
-                      </optgroup>
-                      <optgroup label="Periféricos">
-                        <option value="Teclados">Teclados</option>
-                        <option value="Mouses / Ratones">Mouses / Ratones</option>
-                        <option value="Monitores">Monitores</option>
-                        <option value="Audio / Auriculares">Audio / Auriculares</option>
-                        <option value="Periféricos">Otros Periféricos</option>
-                      </optgroup>
-                    </select>
+                    <span className="text-[10px] font-black text-themeAccent uppercase px-2 py-0.5 rounded-md bg-themeAccent/10 border border-themeAccent/20">
+                      {grupoCategoria} &bull; {categoria}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-center">
+                    {/* Botones Selector de Grupo */}
+                    <div className="md:col-span-5 flex rounded-xl bg-themeInput border border-themeBorder/60 p-1 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGrupoCategoria('Componentes');
+                          if (esPeriferico(categoria)) {
+                            setCategoria('Procesadores (CPU)');
+                          }
+                        }}
+                        className={`flex-1 py-1.5 px-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all active:scale-95 ${
+                          grupoCategoria === 'Componentes'
+                            ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25'
+                            : 'text-themeTextMuted hover:text-themeText hover:bg-themeBorder/40'
+                        }`}
+                      >
+                        Componentes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGrupoCategoria('Periféricos');
+                          if (!esPeriferico(categoria)) {
+                            setCategoria('Teclados');
+                          }
+                        }}
+                        className={`flex-1 py-1.5 px-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all active:scale-95 ${
+                          grupoCategoria === 'Periféricos'
+                            ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25'
+                            : 'text-themeTextMuted hover:text-themeText hover:bg-themeBorder/40'
+                        }`}
+                      >
+                        Periféricos
+                      </button>
+                    </div>
+
+                    {/* Selector de Subcategoría específico al grupo */}
+                    <div className="md:col-span-7">
+                      <select
+                        value={categoria}
+                        onChange={(e) => setCategoria(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-themeInput border border-themeBorder/60 rounded-xl text-themeText text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-themeAccent/40 cursor-pointer"
+                      >
+                        {OPCIONES_CATEGORIA[grupoCategoria].map((opt) => (
+                          <option key={opt.value} value={opt.value} className="bg-themeCard text-themeText font-semibold py-1">
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
