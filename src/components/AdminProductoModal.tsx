@@ -530,8 +530,24 @@ export default function AdminProductoModal({ isOpen, onClose, productoAEditar }:
                       onChange={(e) => setCategoria(e.target.value)}
                       className="w-full max-w-full box-border px-3.5 py-2.5 bg-themeInput border border-themeBorder/60 rounded-xl text-themeText text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-themeAccent/40"
                     >
-                      <option value="Componentes">Componentes</option>
-                      <option value="Periféricos">Periféricos</option>
+                      <optgroup label="Componentes">
+                        <option value="Procesadores (CPU)">Procesadores (CPU)</option>
+                        <option value="Tarjetas Gráficas (GPU)">Tarjetas Gráficas (GPU)</option>
+                        <option value="Memorias RAM">Memorias RAM</option>
+                        <option value="Almacenamiento (SSD/HDD)">Almacenamiento (SSD/HDD)</option>
+                        <option value="Tarjetas Madre (Board)">Tarjetas Madre (Board)</option>
+                        <option value="Fuentes de Poder (PSU)">Fuentes de Poder (PSU)</option>
+                        <option value="Gabinetes (Chasis)">Gabinetes (Chasis)</option>
+                        <option value="Refrigeración (Coolers)">Refrigeración (Coolers)</option>
+                        <option value="Componentes">Otros Componentes</option>
+                      </optgroup>
+                      <optgroup label="Periféricos">
+                        <option value="Teclados">Teclados</option>
+                        <option value="Mouses / Ratones">Mouses / Ratones</option>
+                        <option value="Monitores">Monitores</option>
+                        <option value="Audio / Auriculares">Audio / Auriculares</option>
+                        <option value="Periféricos">Otros Periféricos</option>
+                      </optgroup>
                     </select>
                   </div>
                 </div>

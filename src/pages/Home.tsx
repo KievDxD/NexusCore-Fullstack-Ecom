@@ -3,7 +3,7 @@ import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
 import { Loader2, Plus, Scale } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useComparadorStore, obtenerTipoProducto } from '../hooks/useComparador';
+import { useComparadorStore, obtenerTipoProducto, CATEGORIAS_PRODUCTO } from '../hooks/useComparador';
 import type { Producto } from '../types';
 
 // Un solo modal de administración (antes había uno por tarjeta) y solo se descarga si eres admin
@@ -11,7 +11,8 @@ const AdminProductoModal = lazy(() => import('../components/AdminProductoModal')
 
 export default function Home() {
   const [busqueda, setBusqueda] = useState('');
-  const [categoriaActiva, setCategoriaActiva] = useState<'Todos' | 'Componentes' | 'Periféricos'>('Todos');
+  const [grupoActivo, setGrupoActivo] = useState<'Todos' | 'Componentes' | 'Periféricos'>('Todos');
+  const [tipoActivo, setTipoActivo] = useState<string>('todos');
   
   // 🆕 Usamos nuestro hook premium con soporte de fallback local y control de stock
   const { productos: productosDB, cargando } = useProductos();
@@ -27,6 +28,11 @@ export default function Home() {
     [comparadorItems]
   );
 
+  const subcategoriasDisponibles = useMemo(() => {
+    if (grupoActivo === 'Todos') return CATEGORIAS_PRODUCTO;
+    return CATEGORIAS_PRODUCTO.filter((c) => c.grupo === grupoActivo);
+  }, [grupoActivo]);
+
   const abrirNuevo = useCallback(() => {
     setProductoEnEdicion(null);
     setModalOpen(true);
@@ -40,25 +46,38 @@ export default function Home() {
   // La búsqueda se difiere para no bloquear la escritura con catálogos grandes
   const busquedaDiferida = useDeferredValue(busqueda);
 
-  // Al comparar, aislar y solo dejar los elementos del mismo tipo de componente
+  // Al comparar o filtrar por categoría específica, aislar y solo dejar los elementos del mismo tipo
   const productosFiltrados = useMemo(() => {
     const q = busquedaDiferida.trim().toLowerCase();
     const filtrados = productosDB.filter((producto) => {
-      if (tipoComparando && obtenerTipoProducto(producto).id !== tipoComparando.id) {
-        return false;
+      const tipo = obtenerTipoProducto(producto);
+
+      if (tipoComparando) {
+        if (tipo.id !== tipoComparando.id) return false;
+      } else {
+        if (grupoActivo !== 'Todos' && tipo.grupo !== grupoActivo) {
+          return false;
+        }
+        if (tipoActivo !== 'todos' && tipo.id !== tipoActivo) {
+          return false;
+        }
       }
-      const coincideBusqueda = q === '' || producto.nombre.toLowerCase().includes(q);
-      const coincideCategoria = tipoComparando
-        ? true
-        : categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
-      return coincideBusqueda && coincideCategoria;
+
+      const coincideBusqueda =
+        q === '' ||
+        producto.nombre.toLowerCase().includes(q) ||
+        producto.descripcion.toLowerCase().includes(q) ||
+        (producto.marca && producto.marca.toLowerCase().includes(q));
+
+      return coincideBusqueda;
     });
+
     // Los productos sin stock se van al final (sort estable: el resto conserva su orden)
     return filtrados.sort((a, b) => Number((a.stock ?? 10) === 0) - Number((b.stock ?? 10) === 0));
-  }, [productosDB, busquedaDiferida, categoriaActiva, tipoComparando]);
+  }, [productosDB, busquedaDiferida, grupoActivo, tipoActivo, tipoComparando]);
 
   return (
-    <div id="catalogo" className="space-y-8 animate-fade-in">
+    <div id="catalogo" className="space-y-6 animate-fade-in">
       
       {/* 🛠️ BARRA DE FILTROS Y BUSCADOR */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-themeCard p-4 rounded-xl shadow-sm border border-themeBorder text-themeText transition-all duration-500">
@@ -82,14 +101,17 @@ export default function Home() {
           )}
         </div>
 
-        {/* Botones de Categoría */}
+        {/* Botones de Grupo */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
           {(['Todos', 'Componentes', 'Periféricos'] as const).map((cat) => (
             <button
               key={cat}
-              onClick={() => setCategoriaActiva(cat)}
+              onClick={() => {
+                setGrupoActivo(cat);
+                setTipoActivo('todos');
+              }}
               className={`px-4 py-2 text-xs md:text-sm font-bold rounded-lg transition-all duration-200 active:scale-95 ${
-                categoriaActiva === cat
+                grupoActivo === cat
                   ? 'bg-themeAccent text-white shadow-md shadow-themeAccent/15'
                   : 'bg-themeInput text-themeTextMuted hover:bg-themeBorder hover:text-themeText'
               }`}
@@ -108,6 +130,37 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* 🏷️ CHIPS DE CATEGORÍAS ESPECÍFICAS (CPU, RAM, GPU, SSD, ETC.) */}
+      {!tipoComparando && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none py-1">
+          <button
+            type="button"
+            onClick={() => setTipoActivo('todos')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 ${
+              tipoActivo === 'todos'
+                ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25'
+                : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-themeText border border-themeBorder/60'
+            }`}
+          >
+            Todos ({grupoActivo})
+          </button>
+          {subcategoriasDisponibles.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              onClick={() => setTipoActivo(sub.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 ${
+                tipoActivo === sub.id
+                  ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25 border-transparent'
+                  : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-themeText border border-themeBorder/60'
+              }`}
+            >
+              <span>{sub.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 🏷️ AVISO DE FILTRADO AUTOMÁTICO POR COMPARADOR */}
       {tipoComparando && (
@@ -148,7 +201,7 @@ export default function Home() {
             <p className="text-themeText font-medium text-lg">No encontramos resultados para tu búsqueda</p>
             <p className="text-themeTextMuted text-sm mt-1">Prueba revisando la ortografía o cambiando de categoría.</p>
             <button 
-              onClick={() => { setBusqueda(''); setCategoriaActiva('Todos'); }}
+              onClick={() => { setBusqueda(''); setGrupoActivo('Todos'); setTipoActivo('todos'); }}
               className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-themeAccent hover:bg-themeAccentHover rounded-lg transition-colors active:scale-95"
             >
               Restablecer filtros

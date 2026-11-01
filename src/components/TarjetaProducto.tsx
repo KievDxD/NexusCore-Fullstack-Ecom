@@ -234,9 +234,14 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
 
         {/* Textos Informativos */}
         <div className="p-1">
-          <span className="text-[9px] text-themeAccent font-bold uppercase tracking-wider block mb-1">
-            {producto.marca || 'NEXUS'}
-          </span>
+          <div className="flex items-center justify-between gap-1 mb-1">
+            <span className="text-[9px] text-themeAccent font-black uppercase tracking-wider truncate">
+              {producto.marca || 'NEXUS'}
+            </span>
+            <span className="text-[8px] bg-themeInput text-themeTextMuted px-1.5 py-0.5 rounded-md font-black uppercase tracking-wider shrink-0 border border-themeBorder/40">
+              {tipoEste.corto}
+            </span>
+          </div>
           <h3 className="product-card__title group-hover:text-themeAccent transition-colors line-clamp-2 min-h-[40px]">
             {producto.nombre}
           </h3>

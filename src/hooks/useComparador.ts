@@ -8,17 +8,37 @@ const MAX_COMPARAR = 3;
 export interface TipoProductoInfo {
   id: string;
   label: string;
+  grupo: 'Componentes' | 'Periféricos';
+  corto: string;
 }
+
+export const CATEGORIAS_PRODUCTO: TipoProductoInfo[] = [
+  { id: 'cpu', label: 'Procesadores (CPU)', corto: 'CPU', grupo: 'Componentes' },
+  { id: 'gpu', label: 'Tarjetas Gráficas (GPU)', corto: 'GPU', grupo: 'Componentes' },
+  { id: 'ram', label: 'Memorias RAM', corto: 'RAM', grupo: 'Componentes' },
+  { id: 'storage', label: 'Almacenamiento (SSD/HDD)', corto: 'Almacenamiento', grupo: 'Componentes' },
+  { id: 'board', label: 'Tarjetas Madre (Board)', corto: 'Boards', grupo: 'Componentes' },
+  { id: 'psu', label: 'Fuentes de Poder (PSU)', corto: 'Fuentes', grupo: 'Componentes' },
+  { id: 'case', label: 'Gabinetes (Chasis)', corto: 'Gabinetes', grupo: 'Componentes' },
+  { id: 'cooler', label: 'Refrigeración (Coolers)', corto: 'Coolers', grupo: 'Componentes' },
+  { id: 'teclado', label: 'Teclados', corto: 'Teclados', grupo: 'Periféricos' },
+  { id: 'mouse', label: 'Mouses / Ratones', corto: 'Mouses', grupo: 'Periféricos' },
+  { id: 'monitor', label: 'Monitores', corto: 'Monitores', grupo: 'Periféricos' },
+  { id: 'audio', label: 'Audio / Auriculares', corto: 'Audio', grupo: 'Periféricos' },
+];
 
 export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
   const specs = p.especificaciones ?? {};
   const explicitSlot = (specs['tipo_componente'] || specs['slot'] || specs['tipo'] || '').toLowerCase().trim();
-  const texto = `${p.nombre} ${p.descripcion} ${p.categoria}`.toLowerCase();
+  const cat = (p.categoria || '').toLowerCase().trim();
+  const texto = `${p.nombre} ${p.descripcion} ${cat}`.toLowerCase();
 
   // 1. Procesador / CPU
   if (
     explicitSlot === 'cpu' ||
     explicitSlot === 'procesador' ||
+    cat.includes('procesador') ||
+    cat.includes('cpu') ||
     texto.includes('procesador') ||
     texto.includes('ryzen') ||
     texto.includes('core i3') ||
@@ -28,13 +48,15 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     texto.includes('intel core') ||
     (Boolean(specs['Zócalo']) && !texto.includes('tarjeta madre') && !texto.includes('motherboard') && !texto.includes('cooler') && !texto.includes('disipador'))
   ) {
-    return { id: 'cpu', label: 'Procesadores (CPU)' };
+    return { id: 'cpu', label: 'Procesadores (CPU)', corto: 'CPU', grupo: 'Componentes' };
   }
 
   // 2. Tarjeta Madre / Board
   if (
     explicitSlot === 'board' ||
     explicitSlot === 'motherboard' ||
+    cat.includes('madre') ||
+    cat.includes('board') ||
     texto.includes('tarjeta madre') ||
     texto.includes('motherboard') ||
     texto.includes('placa madre') ||
@@ -45,24 +67,30 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     texto.includes('z790') ||
     texto.includes('b760')
   ) {
-    return { id: 'board', label: 'Tarjetas Madre' };
+    return { id: 'board', label: 'Tarjetas Madre (Board)', corto: 'Boards', grupo: 'Componentes' };
   }
 
   // 3. Memoria RAM
   if (
     explicitSlot === 'ram' ||
+    cat.includes('ram') ||
+    cat.includes('memoria') ||
     texto.includes('memoria ram') ||
     texto.includes('ram ') ||
     texto.includes('ddr4') ||
     texto.includes('ddr5') ||
     texto.includes('vengeance')
   ) {
-    return { id: 'ram', label: 'Memorias RAM' };
+    return { id: 'ram', label: 'Memorias RAM', corto: 'RAM', grupo: 'Componentes' };
   }
 
   // 4. Tarjeta Gráfica / GPU
   if (
     explicitSlot === 'gpu' ||
+    cat.includes('gráfica') ||
+    cat.includes('grafica') ||
+    cat.includes('gpu') ||
+    cat.includes('video') ||
     texto.includes('tarjeta gráfica') ||
     texto.includes('tarjeta grafica') ||
     texto.includes('placa de video') ||
@@ -71,24 +99,30 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     texto.includes('radeon') ||
     texto.includes('gtx')
   ) {
-    return { id: 'gpu', label: 'Tarjetas Gráficas (GPU)' };
+    return { id: 'gpu', label: 'Tarjetas Gráficas (GPU)', corto: 'GPU', grupo: 'Componentes' };
   }
 
   // 5. Almacenamiento SSD / HDD
   if (
     explicitSlot === 'storage' ||
+    cat.includes('almacenamiento') ||
+    cat.includes('ssd') ||
+    cat.includes('disco') ||
     texto.includes('ssd') ||
     texto.includes('nvme') ||
     texto.includes('m.2') ||
     texto.includes('disco duro') ||
     texto.includes('almacenamiento')
   ) {
-    return { id: 'storage', label: 'Almacenamiento (SSD/HDD)' };
+    return { id: 'storage', label: 'Almacenamiento (SSD/HDD)', corto: 'Almacenamiento', grupo: 'Componentes' };
   }
 
   // 6. Refrigeración / Cooler
   if (
     explicitSlot === 'cooler' ||
+    cat.includes('cooler') ||
+    cat.includes('refrigeración') ||
+    cat.includes('disipador') ||
     texto.includes('cooler') ||
     texto.includes('disipador') ||
     texto.includes('noctua') ||
@@ -97,75 +131,93 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     texto.includes('líquida') ||
     texto.includes('liquida')
   ) {
-    return { id: 'cooler', label: 'Refrigeración (Coolers)' };
+    return { id: 'cooler', label: 'Refrigeración (Coolers)', corto: 'Coolers', grupo: 'Componentes' };
   }
 
   // 7. Fuente de Poder / PSU
   if (
     explicitSlot === 'psu' ||
+    cat.includes('fuente') ||
+    cat.includes('psu') ||
     texto.includes('fuente de poder') ||
     texto.includes('fuente') ||
     texto.includes('80 plus') ||
     texto.includes('80+') ||
     texto.includes('power supply')
   ) {
-    return { id: 'psu', label: 'Fuentes de Poder (PSU)' };
+    return { id: 'psu', label: 'Fuentes de Poder (PSU)', corto: 'Fuentes', grupo: 'Componentes' };
   }
 
   // 8. Gabinete / Chasis
   if (
     explicitSlot === 'case' ||
+    cat.includes('gabinete') ||
+    cat.includes('chasis') ||
+    cat.includes('case') ||
     texto.includes('gabinete') ||
     texto.includes('chasis') ||
     texto.includes('case') ||
     texto.includes('nzxt h')
   ) {
-    return { id: 'case', label: 'Gabinetes / Chasis' };
+    return { id: 'case', label: 'Gabinetes (Chasis)', corto: 'Gabinetes', grupo: 'Componentes' };
   }
 
   // 9. Teclado
   if (
     explicitSlot === 'teclado' ||
+    cat.includes('teclado') ||
+    cat.includes('keyboard') ||
     texto.includes('teclado') ||
     texto.includes('keyboard')
   ) {
-    return { id: 'teclado', label: 'Teclados' };
+    return { id: 'teclado', label: 'Teclados', corto: 'Teclados', grupo: 'Periféricos' };
   }
 
   // 10. Mouse
   if (
     explicitSlot === 'mouse' ||
+    cat.includes('mouse') ||
+    cat.includes('raton') ||
+    cat.includes('ratón') ||
     texto.includes('mouse') ||
     texto.includes('ratón') ||
     texto.includes('raton')
   ) {
-    return { id: 'mouse', label: 'Mouses / Ratones' };
+    return { id: 'mouse', label: 'Mouses / Ratones', corto: 'Mouses', grupo: 'Periféricos' };
   }
 
   // 11. Monitor
   if (
     explicitSlot === 'monitor' ||
+    cat.includes('monitor') ||
+    cat.includes('pantalla') ||
     texto.includes('monitor') ||
     texto.includes('pantalla')
   ) {
-    return { id: 'monitor', label: 'Monitores' };
+    return { id: 'monitor', label: 'Monitores', corto: 'Monitores', grupo: 'Periféricos' };
   }
 
   // 12. Audio
   if (
     explicitSlot === 'audio' ||
+    cat.includes('audio') ||
+    cat.includes('auricular') ||
+    cat.includes('audifono') ||
     texto.includes('auricular') ||
     texto.includes('headset') ||
     texto.includes('audifono') ||
     texto.includes('audífono')
   ) {
-    return { id: 'audio', label: 'Audio / Auriculares' };
+    return { id: 'audio', label: 'Audio / Auriculares', corto: 'Audio', grupo: 'Periféricos' };
   }
 
-  const cat = p.categoria?.trim() || 'Componentes';
+  const esPeriferico = cat.includes('periférico') || cat.includes('periferico');
+  const catLabel = p.categoria?.trim() || (esPeriferico ? 'Periféricos' : 'Componentes');
   return {
-    id: `cat_${cat.toLowerCase().replace(/\s+/g, '_')}`,
-    label: cat,
+    id: `cat_${catLabel.toLowerCase().replace(/\s+/g, '_')}`,
+    label: catLabel,
+    corto: catLabel,
+    grupo: esPeriferico ? 'Periféricos' : 'Componentes',
   };
 }
 
