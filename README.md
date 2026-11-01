@@ -82,6 +82,10 @@ Diseñado para eliminar la incertidumbre del armado:
 
 ### 2. ⚖️ Comparador Técnico Lado a Lado (Side-by-Side)
 - Permite seleccionar de 2 a 3 componentes o periféricos del catálogo.
+- **Detección Heurística Anti-Colisiones:**
+  - Clasificación granular estricta (`cpu`, `gpu`, `ram`, `storage`, `board`, `psu`, `case`, `cooler`, `teclado`, `mouse`, `monitor`, `audio`).
+  - Prioridad de evaluación: Placas madre y disipadores se verifican antes que procesadores (por chipsets y descripciones), garantizando que tarjetas madre que mencionen *"Ryzen"* o *"Intel Core"* no se clasifiquen jamás como CPU.
+  - Bloqueo tajante de comparaciones incompatibles entre distintos tipos de hardware con advertencia informativa no intrusiva.
 - **Resaltado Inteligente Heurístico (`obtenerIndicesGanadores`):**
   - Evalúa numéricamente cada especificación técnica y destaca en **verde esmeralda** la mejor alternativa:
     - *Menor valor gana:* Precio final, latencia CAS (CL), tiempo de respuesta (ms), consumo energético (TDP) y nivel de ruido (dB).
@@ -90,9 +94,15 @@ Diseñado para eliminar la incertidumbre del armado:
 
 ---
 
-### 3. 📦 Reserva Concurrente de Stock y Gestión de Pedidos (RPC)
+### 3. 📦 Reserva Concurrente de Stock, Control Crítico y Gestión de Pedidos (RPC)
 - **Eliminación de Bucles y Sobreventa en Carrito:**
   - Si el usuario añade unidades hasta el tope disponible (`enCarrito + cant >= stock`), el sistema desactiva el botón de incremento, cambia el estado visual a inactivo y emite una alerta informativa inmediata.
+- **Módulo de Stock Crítico y Reposición Rápida (`SettingsModal`):**
+  - Identificación automática de productos con stock $\le 3$ unidades o agotados.
+  - Reposición instantánea de +5 o +10 unidades con persistencia atómica en base de datos.
+  - Fijación masiva de inventario global y descuentos porcentuales dinámicos por categoría.
+- **Filtro de Disponibilidad Rápida en Catálogo (`Home`):**
+  - Toggle `soloEnStock` anclado con estado visual esmeralda y sincronización con el comparador.
 - **Transacción Atómica en PostgreSQL (`crear_pedido_y_reservar_stock`):**
   - Utiliza `FOR UPDATE` para bloquear concurrentemente las filas en `public.productos`.
   - Verifica que cada ítem cuente con `stock >= cantidad_solicitada`.
@@ -114,6 +124,9 @@ Diseñado para eliminar la incertidumbre del armado:
 
 ### 5. 🛡️ Panel de Administración y Gestión No Destructiva de Medios
 - **Edición en Portal (`createPortal`):** Resuelve el problema clásico de modales atrapados en contenedores con transformaciones CSS, garantizando proporciones óptimas y cero scrolls innecesarios.
+- **Categorización Jerárquica Limpia (`AdminProductoModal`):**
+  - Selector dual en dos niveles: Grupo Principal (`Componentes` vs `Periféricos`) + Subcategoría contextual a ancho completo.
+  - Elimina desbordes de texto ("Otros Componen...") y desorganización de menús nativos apiñados.
 - **Navegación en 3 Pestañas Rápidas:**
   1. *General:* Imagen principal compacta, identificación, precio, stock y descuento en una sola vista.
   2. *Ficha Técnica:* Descripción extendida y editor dinámico clave-valor de especificaciones.
@@ -134,7 +147,11 @@ Diseñado para eliminar la incertidumbre del armado:
 
 ---
 
-### 7. ⚡ Rendimiento, Cero Parpadeos y CI/CD Keep-Alive
+### 7. ⚡ Rendimiento, Navegación de Filtros y CI/CD Keep-Alive
+- **Navegación Horizontal Aislada de Categorías (`Home.tsx`):**
+  - Barra de desplazamiento personalizada (`.custom-h-scrollbar`) de 6px adaptada al tema activo.
+  - Controles de desplazamiento lateral (`ChevronLeft` / `ChevronRight`) y wheel horizontal no intrusivo.
+  - **Fijación de Viewport:** Aislamiento mediante `data-lenis-prevent="true"`, `overscroll-contain` y listeners no pasivos (`passive: false`) con `preventDefault()`, impidiendo que rodar el ratón sobre las categorías mueva la página verticalmente.
 - **Sin Flash en Recarga (`F5`):** `AuthContext` sincroniza el perfil y permisos de administrador en caché local segura, evitando que la interfaz monte temporalmente vistas de usuario raso mientras valida la sesión con Supabase.
 - **Cero Imágenes Extrañas en Carga Inicial:** El catálogo hidrata desde el almacenamiento local validado (`nexus_catalog_cache_v2`) y muestra skeletons nativos con `<Cpu />` hasta que la imagen real termina de descargar (`onLoad`), impidiendo el parpadeo de imágenes genéricas de muestra.
 - **GitHub Actions Keep-Alive (`supabase-keepalive-ci.yml`):**

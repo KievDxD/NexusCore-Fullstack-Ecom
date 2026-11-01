@@ -43,7 +43,19 @@ El sistema sigue una arquitectura SPA (Single Page Application) basada en **Vite
 - **SettingsModal (`src/components/SettingsModal.tsx`)**: Modal multitab que permite:
   - **Apariencia**: Modificar el tema cromático de fondo global y la divisa activa.
   - **Mi Perfil**: Cambiar el nombre de usuario de la cuenta y actualizar su avatar (subiendo un archivo a Supabase Storage o escogiendo uno predeterminado).
-  - **Admin**: Panel de control con métricas en tiempo real, gestión del número de WhatsApp, aplicación masiva de descuentos por categoría y acciones de emergencia sobre el stock global.
+  - **Admin & Control de Inventario**:
+    - **Gestión de Stock Crítico**: Panel visual que filtra y lista productos con stock $\le 3$ o agotados, con botones de un solo clic para reposición rápida (+5 y +10 unidades) mediante `handleQuickRestock`.
+    - **Fijación de Stock Masivo**: Definición de inventario global para todos los productos mediante input personalizado y acción confirmada.
+    - **Descuentos Dinámicos por Categoría**: Lista reactiva que itera sobre todas las categorías activas del catálogo (`CATEGORIAS_PRODUCTO`).
+    - **Gestión de Pedidos en Vivo**: Liquidación a estado pagado o cancelación con devolución automática de inventario a la base de datos.
+- **AdminProductoModal (`src/components/AdminProductoModal.tsx`)**: Modal de administración con arquitectura en tres pestañas (`General`, `Ficha`, `Galería`). Incorpora categorización jerárquica desacoplada en dos fases:
+  1. *Grupo Principal:* Selector tipo pestaña/toggle entre `Componentes` y `Periféricos`.
+  2. *Subcategoría Específica:* Menú desplegable contextual a ancho completo que elimina desbordes o truncamientos de texto ("Otros Componen..."), organizando de forma limpia procesadores, tarjetas gráficas, memoria RAM, almacenamiento, motherboards, fuentes, chasis y refrigeración.
+- **Barra de Filtros y Desplazamiento Horizontal (`src/pages/Home.tsx` & `src/index.css`)**:
+  - **Scrollbar Estilizado (`.custom-h-scrollbar`)**: Barra horizontal visible con altura de 6px y contraste temático adaptativo que indica la posición exacta de las categorías.
+  - **Navegación Asistida**: Botones de scroll lateral (`ChevronLeft`, `ChevronRight`) y soporte nativo de rueda de ratón horizontal (`handleWheel`).
+  - **Aislamiento Total del Viewport**: Integración con `data-lenis-prevent="true"`, `overscroll-contain` y listener no pasivo (`passive: false`) con `preventDefault()` y `stopPropagation()`, garantizando que rodar el mouse sobre las categorías desplace únicamente la fila de filtros sin mover verticalmente la página.
+  - **Filtro Anclado de Disponibilidad**: Botón conmutador `soloEnStock` con estado visual esmeralda y contador reactivo.
 - **ErrorBoundary (`src/components/ErrorBoundary.tsx`)**: Interceptor global de errores de React que evita que la aplicación se congele ante excepciones no controladas. Provee un mecanismo de "cierre de sesión de emergencia" que limpia exhaustivamente el almacenamiento local y la sesión de Supabase para desatascar bucles de error.
 
 ---
@@ -73,8 +85,9 @@ El backend de base de datos PostgreSQL está estructurado con las siguientes rel
 ## 5. Comparador Técnico Inteligente y Filtrado Dinámico
 
 - **`useComparador.ts`**: Store persistente sobre Zustand (`nexus_comparador_v1`) que gestiona la selección de hasta 3 productos.
-  - **Clasificación Automática de Hardware (`obtenerTipoProducto`)**: Normaliza y agrupa los productos por su arquitectura física o periférica (CPU, Tarjeta Madre, RAM, GPU, Almacenamiento, Fuente, Gabinete, Cooler, Periféricos).
-  - **Aislamiento de Categoría**: Evita comparaciones incompatibles (e.g., comparar un CPU con una memoria RAM). Al agregar un elemento de un nuevo tipo, la selección conmuta limpiamente a ese tipo.
+  - **Clasificación Automática de Hardware (`obtenerTipoProducto`)**: Normaliza y agrupa los productos por su arquitectura física o periférica (`CATEGORIAS_PRODUCTO`: Procesadores, Gráficas, RAM, Almacenamiento, Tarjetas Madre, Fuentes, Chasis, Coolers, Teclados, Mouses, Monitores, Audio).
+  - **Jerarquía Anti-Colisiones en Detección**: Evalúa primero las tarjetas madre (`Chipset`, `motherboard`, `tarjeta madre`, familias de chipsets `B550`, `Z790`, etc.) y sistemas de refrigeración (`cooler`, `disipador`) antes de evaluar procesadores. Esto previene que placas madre que mencionan compatibilidad con *"procesadores AMD Ryzen"* o *"Intel Core"* en su descripción sean categorizadas erróneamente como CPUs.
+  - **Aislamiento y Bloqueo de Comparación Cruzada**: Bloquea de forma tajante comparar componentes de distinta índole (e.g. un CPU con una placa madre o un módulo de RAM) emitiendo notificaciones informativas discretas.
   - **Métricas Ganadoras (`obtenerIndicesGanadores`)**: Algoritmo que analiza los valores técnicos extraídos de las especificaciones y precios para destacar automáticamente en verde las celdas con ventaja cuantitativa (menor precio, mayor frecuencia, mayor VRAM, menor latencia, etc.).
 - **`ComparadorModal.tsx`**: Modal lado a lado con tabla técnica completa, cálculo de diferencias y barra flotante de control.
 - **Filtrado Reactivo en `Home.tsx`**: Cuando hay al menos un producto en comparación, el catálogo oculta automáticamente todos los productos ajenos a esa categoría, permitiendo al usuario seleccionar exclusivamente entre componentes del mismo tipo.

@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense, useRef } from 'react';
+import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense, useRef, useEffect } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
 import { Loader2, Plus, Scale, Package, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -45,6 +45,26 @@ export default function Home() {
       });
     }
   };
+
+  // Bloquear scroll vertical de la ventana / Lenis al hacer scroll con la rueda sobre las categorías
+  useEffect(() => {
+    const el = subcategoriasRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0 || e.deltaX !== 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        el.scrollLeft += delta;
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+    };
+  }, [tipoComparando, grupoActivo]);
 
   const abrirNuevo = useCallback(() => {
     setProductoEnEdicion(null);
@@ -150,7 +170,10 @@ export default function Home() {
 
       {/* 🏷️ CHIPS DE CATEGORÍAS ESPECÍFICAS CON BARRA DE DESPLAZAMIENTO Y NAVEGACIÓN */}
       {!tipoComparando && (
-        <div className="flex items-center gap-2 bg-themeCard/60 border border-themeBorder/70 p-2 rounded-2xl shadow-sm">
+        <div
+          data-lenis-prevent="true"
+          className="flex items-center gap-2 bg-themeCard/60 border border-themeBorder/70 p-2 rounded-2xl shadow-sm overscroll-contain"
+        >
           {/* Botón Scroll Izquierda */}
           <button
             type="button"
@@ -161,15 +184,11 @@ export default function Home() {
             <ChevronLeft size={16} />
           </button>
 
-          {/* Contenedor scrolleable con scrollbar visible y wheel horizontal */}
+          {/* Contenedor scrolleable con scrollbar visible y wheel horizontal independiente (sin mover la página) */}
           <div
             ref={subcategoriasRef}
-            onWheel={(e) => {
-              if (e.deltaY !== 0 && subcategoriasRef.current) {
-                subcategoriasRef.current.scrollLeft += e.deltaY;
-              }
-            }}
-            className="flex-1 flex items-center gap-2 overflow-x-auto pb-2 pt-1 custom-h-scrollbar scroll-smooth"
+            data-lenis-prevent="true"
+            className="flex-1 flex items-center gap-2 overflow-x-auto pb-2 pt-1 custom-h-scrollbar scroll-smooth overscroll-contain"
           >
             <button
               type="button"
