@@ -193,41 +193,26 @@ export const useComparadorStore = create<ComparadorState>()(
           return;
         }
 
-        // Restricción: comparar solo componentes del mismo tipo
+        // Si se elige un tipo diferente, cambiamos limpiamente a esa categoría sin mensajes intrusivos
         if (actuales.length > 0) {
           const tipoActual = obtenerTipoProducto(actuales[0]);
           const tipoNuevo = obtenerTipoProducto(producto);
 
           if (tipoActual.id !== tipoNuevo.id) {
-            toast.warning('Solo puedes comparar componentes del mismo tipo', {
-              description: `Actualmente comparas ${tipoActual.label}. No tiene sentido comparar con ${tipoNuevo.label}.`,
-              action: {
-                label: `Comparar ${tipoNuevo.label}`,
-                onClick: () => {
-                  set({ items: [producto] });
-                  toast.success(`Iniciando comparativa de ${tipoNuevo.label}`, {
-                    description: `1/${MAX_COMPARAR}: ${producto.nombre}`,
-                  });
-                },
-              },
-            });
+            set({ items: [producto] });
+            toast.info(`Comparando ${tipoNuevo.label}`);
             return;
           }
         }
 
         if (actuales.length >= MAX_COMPARAR) {
-          toast.warning(`Máximo ${MAX_COMPARAR} productos en el comparador`, {
-            description: 'Quita uno de los productos seleccionados para agregar otro.',
-          });
+          toast.warning(`Máximo ${MAX_COMPARAR} productos en el comparador`);
           return;
         }
 
         const nuevos = [...actuales, producto];
-        const tipo = obtenerTipoProducto(producto);
         set({ items: nuevos });
-        toast.success(`Agregado al comparador (${nuevos.length}/${MAX_COMPARAR})`, {
-          description: nuevos.length >= 2 ? `¡Comparativa de ${tipo.label} lista para abrir!` : `Selecciona otro producto de ${tipo.label} para comparar.`,
-        });
+        toast.success(`Agregado: ${producto.nombre} (${nuevos.length}/${MAX_COMPARAR})`);
       },
 
       quitarDeComparador: (id) =>

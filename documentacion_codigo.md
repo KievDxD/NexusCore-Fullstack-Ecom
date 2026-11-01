@@ -65,3 +65,46 @@ El backend de base de datos PostgreSQL está estructurado con las siguientes rel
 - **`perfiles`**: Tabla enlazada directamente con la tabla interna de usuarios de Supabase (`auth.users`), almacenando nombre de usuario, url de avatar, rol (ej: 'admin') y marcas temporales.
 - **`resenas`**: Tabla intermedia que vincula un usuario y un producto para almacenar puntuación, opiniones escritas y fechas de creación.
 - **`configuraciones`**: Tabla clave-valor para almacenar parámetros persistentes de la plataforma, como el número telefónico de WhatsApp de la tienda.
+- **`pedidos`**: Registro de órdenes con cliente, teléfono, método de pago (`whatsapp` | `wompi`), divisa, total, estado (`pendiente` | `pagado` | `cancelado`) y referencia de pago.
+- **`pedido_items`**: Detalle de productos y cantidades asociadas a cada pedido con precio unitario congelado al momento de la compra.
+
+---
+
+## 5. Comparador Técnico Inteligente y Filtrado Dinámico
+
+- **`useComparador.ts`**: Store persistente sobre Zustand (`nexus_comparador_v1`) que gestiona la selección de hasta 3 productos.
+  - **Clasificación Automática de Hardware (`obtenerTipoProducto`)**: Normaliza y agrupa los productos por su arquitectura física o periférica (CPU, Tarjeta Madre, RAM, GPU, Almacenamiento, Fuente, Gabinete, Cooler, Periféricos).
+  - **Aislamiento de Categoría**: Evita comparaciones incompatibles (e.g., comparar un CPU con una memoria RAM). Al agregar un elemento de un nuevo tipo, la selección conmuta limpiamente a ese tipo.
+  - **Métricas Ganadoras (`obtenerIndicesGanadores`)**: Algoritmo que analiza los valores técnicos extraídos de las especificaciones y precios para destacar automáticamente en verde las celdas con ventaja cuantitativa (menor precio, mayor frecuencia, mayor VRAM, menor latencia, etc.).
+- **`ComparadorModal.tsx`**: Modal lado a lado con tabla técnica completa, cálculo de diferencias y barra flotante de control.
+- **Filtrado Reactivo en `Home.tsx`**: Cuando hay al menos un producto en comparación, el catálogo oculta automáticamente todos los productos ajenos a esa categoría, permitiendo al usuario seleccionar exclusivamente entre componentes del mismo tipo.
+
+---
+
+## 6. Asistente de Compatibilidad PC Builder
+
+- **`usePCBuilder.ts`**: Motor algorítmico de ensamble y verificación de compatibilidad de hardware.
+  - **Pasos Secuenciales**: Flujo guiado por slots (`cpu`, `board`, `ram`, `gpu`, `storage`, `cooler`, `case`, `psu`).
+  - **Matriz de Compatibilidad**: Valida compatibilidad de sockets (AM4, AM5, LGA1700, LGA1200), estándar de memoria (DDR4 vs DDR5), factor de forma físico (ATX, Micro-ATX, Mini-ITX) y soporte en el chasis.
+  - **Cálculo de Consumo Energético**: Suma el TDP estimado de las piezas seleccionadas y calcula la potencia de fuente de poder recomendada con margen de seguridad (+150W a +200W).
+- **`PCBuilderModal.tsx`**: Interfaz interactiva donde el usuario visualiza las piezas seleccionadas, alertas de incompatibilidad en tiempo real y el botón para exportar todo el ensamble al carrito en un solo clic.
+
+---
+
+## 7. Pasarela de Pagos Wompi y Motor Transaccional
+
+- **`usePedidos.ts`**: Administra el ciclo de vida de los pedidos, reservas de stock y generación de firmas criptográficas.
+  - **Firma de Integridad Wompi (`generarFirmaIntegridadWompi`)**: Calcula el hash SHA-256 concatenando la referencia, el monto en centavos, la divisa (`COP`) y el Integrity Secret de Wompi mediante la Web Crypto API nativa.
+  - **Reserva Atómica de Stock (`crear_pedido_con_reserva`)**: Invoca la función almacenada de Postgres (RPC) para verificar stock, decrementar unidades y crear la orden dentro de una transacción ACID, previniendo sobreventas (*overselling*).
+- **`WompiCheckoutModal.tsx`**: Widget incrustado que conecta con el Checkout Web de Wompi para procesar tarjetas de crédito/débito, PSE, Nequi y Bancolombia.
+- **Webhook de Supabase (`supabase/functions/wompi-webhook`)**: Edge Function que valida eventos de confirmación (`transaction.updated`), verifica el checksum y actualiza el pedido a `pagado` o revierte el stock en caso de transacción declinada.
+
+---
+
+## 8. Utilidades de Negocio y Precios
+
+- **`currency.ts`**:
+  - `precioConDescuento`: Aplica el porcentaje de rebaja sobre el precio base.
+  - `convertPrice` / `formatCurrency`: Convierte y formatea valores entre COP, USD y MXN según las tasas sincronizadas en `useSettings`.
+- **`discount.ts`**:
+  - `getDiscountBadgeStyle`: Clasifica descuentos en niveles (`none`, `low`, `medium`, `high`) para asignar estilos, animaciones (`animate-bounce`, `animate-pulse`) y badges distintivos según el ahorro porcentual.

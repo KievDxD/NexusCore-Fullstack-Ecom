@@ -1,8 +1,9 @@
 import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, Scale } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useComparadorStore, obtenerTipoProducto } from '../hooks/useComparador';
 import type { Producto } from '../types';
 
 // Un solo modal de administración (antes había uno por tarjeta) y solo se descarga si eres admin
@@ -18,6 +19,14 @@ export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [productoEnEdicion, setProductoEnEdicion] = useState<Producto | null>(null);
 
+  // Estado del comparador para aislar la categoría activa de comparación
+  const comparadorItems = useComparadorStore((s) => s.items);
+  const limpiarComparador = useComparadorStore((s) => s.limpiarComparador);
+  const tipoComparando = useMemo(
+    () => (comparadorItems.length > 0 ? obtenerTipoProducto(comparadorItems[0]) : null),
+    [comparadorItems]
+  );
+
   const abrirNuevo = useCallback(() => {
     setProductoEnEdicion(null);
     setModalOpen(true);
@@ -31,17 +40,22 @@ export default function Home() {
   // La búsqueda se difiere para no bloquear la escritura con catálogos grandes
   const busquedaDiferida = useDeferredValue(busqueda);
 
-  // Ahora el filtro usa productosDB en lugar de la lista falsa y ordena por stock
+  // Al comparar, aislar y solo dejar los elementos del mismo tipo de componente
   const productosFiltrados = useMemo(() => {
     const q = busquedaDiferida.trim().toLowerCase();
     const filtrados = productosDB.filter((producto) => {
+      if (tipoComparando && obtenerTipoProducto(producto).id !== tipoComparando.id) {
+        return false;
+      }
       const coincideBusqueda = q === '' || producto.nombre.toLowerCase().includes(q);
-      const coincideCategoria = categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
+      const coincideCategoria = tipoComparando
+        ? true
+        : categoriaActiva === 'Todos' || producto.categoria === categoriaActiva;
       return coincideBusqueda && coincideCategoria;
     });
     // Los productos sin stock se van al final (sort estable: el resto conserva su orden)
     return filtrados.sort((a, b) => Number((a.stock ?? 10) === 0) - Number((b.stock ?? 10) === 0));
-  }, [productosDB, busquedaDiferida, categoriaActiva]);
+  }, [productosDB, busquedaDiferida, categoriaActiva, tipoComparando]);
 
   return (
     <div id="catalogo" className="space-y-8 animate-fade-in">
@@ -94,6 +108,25 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* 🏷️ AVISO DE FILTRADO AUTOMÁTICO POR COMPARADOR */}
+      {tipoComparando && (
+        <div className="flex items-center justify-between gap-3 bg-themeCard/90 border border-themeAccent/30 px-4 py-2.5 rounded-xl shadow-sm text-xs animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Scale size={16} className="text-themeAccent shrink-0" />
+            <span className="text-themeText font-medium">
+              Comparando <strong className="text-themeAccent font-black">{tipoComparando.label}</strong> ({comparadorItems.length}/3)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={limpiarComparador}
+            className="text-[11px] font-bold text-themeTextMuted hover:text-red-400 transition-colors cursor-pointer"
+          >
+            Quitar filtro
+          </button>
+        </div>
+      )}
 
       {/* ⏳ PANTALLA DE CARGA */}
       {cargando && productosDB.length === 0 ? (
