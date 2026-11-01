@@ -1,7 +1,7 @@
-import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense } from 'react';
+import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense, useRef } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
-import { Loader2, Plus, Scale, Package } from 'lucide-react';
+import { Loader2, Plus, Scale, Package, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useComparadorStore, obtenerTipoProducto, CATEGORIAS_PRODUCTO } from '../hooks/useComparador';
 import type { Producto } from '../types';
@@ -33,6 +33,18 @@ export default function Home() {
     if (grupoActivo === 'Todos') return CATEGORIAS_PRODUCTO;
     return CATEGORIAS_PRODUCTO.filter((c) => c.grupo === grupoActivo);
   }, [grupoActivo]);
+
+  const subcategoriasRef = useRef<HTMLDivElement>(null);
+
+  const scrollSubcategorias = (direccion: 'izq' | 'der') => {
+    if (subcategoriasRef.current) {
+      const scrollAmount = 260;
+      subcategoriasRef.current.scrollBy({
+        left: direccion === 'izq' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth',
+      });
+    }
+  };
 
   const abrirNuevo = useCallback(() => {
     setProductoEnEdicion(null);
@@ -136,46 +148,83 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 🏷️ CHIPS DE CATEGORÍAS ESPECÍFICAS (CPU, RAM, GPU, SSD, ETC.) */}
+      {/* 🏷️ CHIPS DE CATEGORÍAS ESPECÍFICAS CON BARRA DE DESPLAZAMIENTO Y NAVEGACIÓN */}
       {!tipoComparando && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none py-1">
+        <div className="flex items-center gap-2 bg-themeCard/60 border border-themeBorder/70 p-2 rounded-2xl shadow-sm">
+          {/* Botón Scroll Izquierda */}
           <button
             type="button"
-            onClick={() => setTipoActivo('todos')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 ${
-              tipoActivo === 'todos'
-                ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25'
-                : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-themeText border border-themeBorder/60'
-            }`}
+            onClick={() => scrollSubcategorias('izq')}
+            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-xl bg-themeInput/80 hover:bg-themeBorder text-themeTextMuted hover:text-themeText transition-all shrink-0 active:scale-95 shadow-xs"
+            title="Desplazar categorías a la izquierda"
           >
-            Todos ({grupoActivo})
+            <ChevronLeft size={16} />
           </button>
-          {subcategoriasDisponibles.map((sub) => (
+
+          {/* Contenedor scrolleable con scrollbar visible y wheel horizontal */}
+          <div
+            ref={subcategoriasRef}
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && subcategoriasRef.current) {
+                subcategoriasRef.current.scrollLeft += e.deltaY;
+              }
+            }}
+            className="flex-1 flex items-center gap-2 overflow-x-auto pb-2 pt-1 custom-h-scrollbar scroll-smooth"
+          >
             <button
-              key={sub.id}
               type="button"
-              onClick={() => setTipoActivo(sub.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 ${
-                tipoActivo === sub.id
-                  ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25 border-transparent'
+              onClick={() => setTipoActivo('todos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 ${
+                tipoActivo === 'todos'
+                  ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25'
                   : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-themeText border border-themeBorder/60'
               }`}
             >
-              <span>{sub.label}</span>
+              Todos ({grupoActivo})
             </button>
-          ))}
+            {subcategoriasDisponibles.map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => setTipoActivo(sub.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 ${
+                  tipoActivo === sub.id
+                    ? 'bg-themeAccent text-white shadow-sm shadow-themeAccent/25 border-transparent'
+                    : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-themeText border border-themeBorder/60'
+                }`}
+              >
+                <span>{sub.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Botón Scroll Derecha */}
+          <button
+            type="button"
+            onClick={() => scrollSubcategorias('der')}
+            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-xl bg-themeInput/80 hover:bg-themeBorder text-themeTextMuted hover:text-themeText transition-all shrink-0 active:scale-95 shadow-xs"
+            title="Desplazar categorías a la derecha"
+          >
+            <ChevronRight size={16} />
+          </button>
+
+          {/* Separador vertical */}
+          <div className="h-6 w-px bg-themeBorder/70 shrink-0 mx-1" />
+
+          {/* Botón de Disponibilidad (En Stock) anclado */}
           <button
             type="button"
             onClick={() => setSoloEnStock((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 ml-auto border ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 border ${
               soloEnStock
                 ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm shadow-emerald-500/25'
-                : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-emerald-400 border border-themeBorder/60'
+                : 'bg-themeCard/90 hover:bg-themeCard text-themeTextMuted hover:text-emerald-400 border border-themeBorder/80'
             }`}
             title={soloEnStock ? 'Mostrando solo productos con stock disponible' : 'Filtrar por productos en stock'}
           >
             <Package size={13} />
-            <span>{soloEnStock ? 'En Stock ✓' : 'Disponibilidad'}</span>
+            <span className="hidden md:inline">{soloEnStock ? 'En Stock ✓' : 'Disponibilidad'}</span>
+            <span className="md:hidden">{soloEnStock ? 'Stock' : 'Todos'}</span>
           </button>
         </div>
       )}

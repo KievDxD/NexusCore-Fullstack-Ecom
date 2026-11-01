@@ -129,6 +129,7 @@
   }
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
+    height: 4px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
@@ -139,6 +140,27 @@
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgb(var(--theme-accent) / 0.45);
+  }
+
+  /* Barra de desplazamiento horizontal visible y estilizada para filtros de categorías */
+  .custom-h-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--theme-accent) / 0.45) rgb(var(--theme-border) / 0.35);
+  }
+  .custom-h-scrollbar::-webkit-scrollbar {
+    height: 6px;
+  }
+  .custom-h-scrollbar::-webkit-scrollbar-track {
+    background: rgb(var(--theme-border) / 0.3);
+    border-radius: 999px;
+    margin: 0 4px;
+  }
+  .custom-h-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--theme-accent) / 0.45);
+    border-radius: 999px;
+  }
+  .custom-h-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--theme-accent) / 0.75);
   }
 
   /* GPU-accelerated transitions para elementos que se animan frecuentemente */
