@@ -54,15 +54,109 @@ export function detectarSlotProducto(p: Producto): PCBuilderSlot | null {
     return explicitSlot;
   }
 
-  const texto = `${p.nombre} ${p.descripcion}`.toLowerCase();
-  if (texto.includes('procesador') || texto.includes('ryzen') || texto.includes('core i')) return 'cpu';
-  if (texto.includes('tarjeta madre') || texto.includes('motherboard') || texto.includes('b550') || texto.includes('b650') || texto.includes('z790')) return 'board';
-  if (texto.includes('ram ') || texto.includes('memoria ram') || texto.includes('vengeance') || texto.includes('ddr4') || texto.includes('ddr5')) return 'ram';
-  if (texto.includes('tarjeta gráfica') || texto.includes('tarjeta grafica') || texto.includes('rtx') || texto.includes('radeon') || texto.includes('geforce')) return 'gpu';
-  if (texto.includes('ssd') || texto.includes('nvme') || texto.includes('m.2')) return 'storage';
-  if (texto.includes('cooler') || texto.includes('disipador') || texto.includes('noctua') || texto.includes('líquida')) return 'cooler';
-  if (texto.includes('gabinete') || texto.includes('chasis') || texto.includes('nzxt h')) return 'case';
-  if (texto.includes('fuente') || texto.includes('80+') || texto.includes('80 plus') || texto.includes('evga 600w')) return 'psu';
+  const nombre = (p.nombre || '').toLowerCase();
+  const cat = (p.categoria || '').toLowerCase();
+
+  // Tarjeta Madre (evaluar antes de CPU para evitar que descripciones con 'Ryzen' o 'procesador' la clasifiquen como CPU)
+  if (
+    cat.includes('madre') ||
+    cat.includes('board') ||
+    nombre.includes('tarjeta madre') ||
+    nombre.includes('motherboard') ||
+    nombre.includes('placa madre') ||
+    nombre.includes('placa base') ||
+    Boolean(specs['Chipset']) ||
+    /\b(b450|b550|b650|b760|x570|x670|z690|z790|a520|a620|h610)\b/i.test(nombre)
+  ) {
+    return 'board';
+  }
+
+  // Cooler
+  if (
+    cat.includes('cooler') ||
+    cat.includes('refriger') ||
+    nombre.includes('cooler') ||
+    nombre.includes('disipador') ||
+    nombre.includes('refrigeración') ||
+    nombre.includes('refrigeracion') ||
+    nombre.includes('noctua') ||
+    nombre.includes('aio') ||
+    nombre.includes('líquida')
+  ) {
+    return 'cooler';
+  }
+
+  // RAM
+  if (
+    cat.includes('ram') ||
+    nombre.includes('ram ') ||
+    nombre.includes('memoria ram') ||
+    nombre.includes('ddr4') ||
+    nombre.includes('ddr5') ||
+    nombre.includes('vengeance')
+  ) {
+    return 'ram';
+  }
+
+  // GPU
+  if (
+    cat.includes('gráfica') ||
+    cat.includes('grafica') ||
+    cat.includes('gpu') ||
+    nombre.includes('tarjeta gráfica') ||
+    nombre.includes('tarjeta grafica') ||
+    nombre.includes('rtx') ||
+    nombre.includes('geforce') ||
+    nombre.includes('radeon')
+  ) {
+    return 'gpu';
+  }
+
+  // Almacenamiento
+  if (
+    cat.includes('ssd') ||
+    cat.includes('almacenamiento') ||
+    nombre.includes('ssd') ||
+    nombre.includes('nvme') ||
+    nombre.includes('m.2')
+  ) {
+    return 'storage';
+  }
+
+  // Fuente
+  if (
+    cat.includes('fuente') ||
+    cat.includes('psu') ||
+    nombre.includes('fuente') ||
+    nombre.includes('80 plus') ||
+    nombre.includes('80+')
+  ) {
+    return 'psu';
+  }
+
+  // Gabinete
+  if (
+    cat.includes('gabinete') ||
+    cat.includes('chasis') ||
+    nombre.includes('gabinete') ||
+    nombre.includes('chasis') ||
+    nombre.includes('case') ||
+    nombre.includes('nzxt h')
+  ) {
+    return 'case';
+  }
+
+  // Procesador
+  if (
+    cat.includes('procesador') ||
+    cat.includes('cpu') ||
+    nombre.includes('procesador') ||
+    nombre.includes('ryzen') ||
+    nombre.includes('core i') ||
+    (Boolean(specs['Zócalo']) && !specs['Chipset'] && !nombre.includes('madre') && !nombre.includes('board'))
+  ) {
+    return 'cpu';
+  }
 
   return null;
 }

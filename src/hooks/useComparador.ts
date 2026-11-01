@@ -31,43 +31,42 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
   const specs = p.especificaciones ?? {};
   const explicitSlot = (specs['tipo_componente'] || specs['slot'] || specs['tipo'] || '').toLowerCase().trim();
   const cat = (p.categoria || '').toLowerCase().trim();
-  const texto = `${p.nombre} ${p.descripcion} ${cat}`.toLowerCase();
+  const nombre = (p.nombre || '').toLowerCase().trim();
 
-  // 1. Procesador / CPU
-  if (
-    explicitSlot === 'cpu' ||
-    explicitSlot === 'procesador' ||
-    cat.includes('procesador') ||
-    cat.includes('cpu') ||
-    texto.includes('procesador') ||
-    texto.includes('ryzen') ||
-    texto.includes('core i3') ||
-    texto.includes('core i5') ||
-    texto.includes('core i7') ||
-    texto.includes('core i9') ||
-    texto.includes('intel core') ||
-    (Boolean(specs['Zócalo']) && !texto.includes('tarjeta madre') && !texto.includes('motherboard') && !texto.includes('cooler') && !texto.includes('disipador'))
-  ) {
-    return { id: 'cpu', label: 'Procesadores (CPU)', corto: 'CPU', grupo: 'Componentes' };
-  }
-
-  // 2. Tarjeta Madre / Board
+  // 1. Tarjeta Madre / Board (evaluar antes que CPU para evitar que descripciones que mencionan 'Ryzen' o 'procesador' clasifiquen la board erróneamente)
   if (
     explicitSlot === 'board' ||
     explicitSlot === 'motherboard' ||
     cat.includes('madre') ||
     cat.includes('board') ||
-    texto.includes('tarjeta madre') ||
-    texto.includes('motherboard') ||
-    texto.includes('placa madre') ||
-    texto.includes('placa base') ||
-    texto.includes('b550') ||
-    texto.includes('b650') ||
-    texto.includes('x670') ||
-    texto.includes('z790') ||
-    texto.includes('b760')
+    nombre.includes('tarjeta madre') ||
+    nombre.includes('motherboard') ||
+    nombre.includes('placa madre') ||
+    nombre.includes('placa base') ||
+    Boolean(specs['Chipset']) ||
+    /\b(b450|b550|b650|b760|x570|x670|z690|z790|a520|a620|h610)\b/i.test(nombre)
   ) {
     return { id: 'board', label: 'Tarjetas Madre (Board)', corto: 'Boards', grupo: 'Componentes' };
+  }
+
+  // 2. Cooler / Refrigeración (evaluar antes que CPU por la misma razón)
+  if (
+    explicitSlot === 'cooler' ||
+    explicitSlot === 'disipador' ||
+    cat.includes('cooler') ||
+    cat.includes('refriger') ||
+    cat.includes('disipad') ||
+    nombre.includes('cooler') ||
+    nombre.includes('disipador') ||
+    nombre.includes('refrigeración') ||
+    nombre.includes('refrigeracion') ||
+    nombre.includes('noctua') ||
+    nombre.includes('water cooling') ||
+    nombre.includes('aio') ||
+    nombre.includes('líquida') ||
+    nombre.includes('liquida')
+  ) {
+    return { id: 'cooler', label: 'Refrigeración (Coolers)', corto: 'Coolers', grupo: 'Componentes' };
   }
 
   // 3. Memoria RAM
@@ -75,11 +74,13 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     explicitSlot === 'ram' ||
     cat.includes('ram') ||
     cat.includes('memoria') ||
-    texto.includes('memoria ram') ||
-    texto.includes('ram ') ||
-    texto.includes('ddr4') ||
-    texto.includes('ddr5') ||
-    texto.includes('vengeance')
+    nombre.includes('memoria ram') ||
+    nombre.includes('ram ') ||
+    nombre.includes('ddr4') ||
+    nombre.includes('ddr5') ||
+    nombre.includes('vengeance') ||
+    nombre.includes('fury') ||
+    nombre.includes('trident')
   ) {
     return { id: 'ram', label: 'Memorias RAM', corto: 'RAM', grupo: 'Componentes' };
   }
@@ -91,13 +92,13 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     cat.includes('grafica') ||
     cat.includes('gpu') ||
     cat.includes('video') ||
-    texto.includes('tarjeta gráfica') ||
-    texto.includes('tarjeta grafica') ||
-    texto.includes('placa de video') ||
-    texto.includes('rtx') ||
-    texto.includes('geforce') ||
-    texto.includes('radeon') ||
-    texto.includes('gtx')
+    nombre.includes('tarjeta gráfica') ||
+    nombre.includes('tarjeta grafica') ||
+    nombre.includes('placa de video') ||
+    nombre.includes('rtx') ||
+    nombre.includes('geforce') ||
+    nombre.includes('radeon') ||
+    nombre.includes('gtx')
   ) {
     return { id: 'gpu', label: 'Tarjetas Gráficas (GPU)', corto: 'GPU', grupo: 'Componentes' };
   }
@@ -108,58 +109,61 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     cat.includes('almacenamiento') ||
     cat.includes('ssd') ||
     cat.includes('disco') ||
-    texto.includes('ssd') ||
-    texto.includes('nvme') ||
-    texto.includes('m.2') ||
-    texto.includes('disco duro') ||
-    texto.includes('almacenamiento')
+    nombre.includes('ssd') ||
+    nombre.includes('nvme') ||
+    nombre.includes('m.2') ||
+    nombre.includes('disco duro') ||
+    nombre.includes('almacenamiento') ||
+    nombre.includes('hdd') ||
+    nombre.includes('sata')
   ) {
     return { id: 'storage', label: 'Almacenamiento (SSD/HDD)', corto: 'Almacenamiento', grupo: 'Componentes' };
   }
 
-  // 6. Refrigeración / Cooler
-  if (
-    explicitSlot === 'cooler' ||
-    cat.includes('cooler') ||
-    cat.includes('refrigeración') ||
-    cat.includes('disipador') ||
-    texto.includes('cooler') ||
-    texto.includes('disipador') ||
-    texto.includes('noctua') ||
-    texto.includes('refrigeración') ||
-    texto.includes('refrigeracion') ||
-    texto.includes('líquida') ||
-    texto.includes('liquida')
-  ) {
-    return { id: 'cooler', label: 'Refrigeración (Coolers)', corto: 'Coolers', grupo: 'Componentes' };
-  }
-
-  // 7. Fuente de Poder / PSU
+  // 6. Fuente de Poder / PSU
   if (
     explicitSlot === 'psu' ||
     cat.includes('fuente') ||
     cat.includes('psu') ||
-    texto.includes('fuente de poder') ||
-    texto.includes('fuente') ||
-    texto.includes('80 plus') ||
-    texto.includes('80+') ||
-    texto.includes('power supply')
+    nombre.includes('fuente de poder') ||
+    nombre.includes('fuente') ||
+    nombre.includes('80 plus') ||
+    nombre.includes('80+') ||
+    nombre.includes('power supply')
   ) {
     return { id: 'psu', label: 'Fuentes de Poder (PSU)', corto: 'Fuentes', grupo: 'Componentes' };
   }
 
-  // 8. Gabinete / Chasis
+  // 7. Gabinete / Chasis
   if (
     explicitSlot === 'case' ||
     cat.includes('gabinete') ||
     cat.includes('chasis') ||
     cat.includes('case') ||
-    texto.includes('gabinete') ||
-    texto.includes('chasis') ||
-    texto.includes('case') ||
-    texto.includes('nzxt h')
+    nombre.includes('gabinete') ||
+    nombre.includes('chasis') ||
+    nombre.includes('case') ||
+    nombre.includes('nzxt h')
   ) {
     return { id: 'case', label: 'Gabinetes (Chasis)', corto: 'Gabinetes', grupo: 'Componentes' };
+  }
+
+  // 8. Procesador / CPU (con exclusión explícita de tarjetas madre y coolers)
+  if (
+    explicitSlot === 'cpu' ||
+    explicitSlot === 'procesador' ||
+    cat.includes('procesador') ||
+    cat.includes('cpu') ||
+    nombre.includes('procesador') ||
+    nombre.includes('ryzen') ||
+    nombre.includes('core i3') ||
+    nombre.includes('core i5') ||
+    nombre.includes('core i7') ||
+    nombre.includes('core i9') ||
+    nombre.includes('intel core') ||
+    (Boolean(specs['Zócalo']) && !specs['Chipset'] && !nombre.includes('madre') && !nombre.includes('board'))
+  ) {
+    return { id: 'cpu', label: 'Procesadores (CPU)', corto: 'CPU', grupo: 'Componentes' };
   }
 
   // 9. Teclado
@@ -167,8 +171,8 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     explicitSlot === 'teclado' ||
     cat.includes('teclado') ||
     cat.includes('keyboard') ||
-    texto.includes('teclado') ||
-    texto.includes('keyboard')
+    nombre.includes('teclado') ||
+    nombre.includes('keyboard')
   ) {
     return { id: 'teclado', label: 'Teclados', corto: 'Teclados', grupo: 'Periféricos' };
   }
@@ -179,9 +183,9 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     cat.includes('mouse') ||
     cat.includes('raton') ||
     cat.includes('ratón') ||
-    texto.includes('mouse') ||
-    texto.includes('ratón') ||
-    texto.includes('raton')
+    nombre.includes('mouse') ||
+    nombre.includes('ratón') ||
+    nombre.includes('raton')
   ) {
     return { id: 'mouse', label: 'Mouses / Ratones', corto: 'Mouses', grupo: 'Periféricos' };
   }
@@ -191,8 +195,8 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     explicitSlot === 'monitor' ||
     cat.includes('monitor') ||
     cat.includes('pantalla') ||
-    texto.includes('monitor') ||
-    texto.includes('pantalla')
+    nombre.includes('monitor') ||
+    nombre.includes('pantalla')
   ) {
     return { id: 'monitor', label: 'Monitores', corto: 'Monitores', grupo: 'Periféricos' };
   }
@@ -203,10 +207,10 @@ export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
     cat.includes('audio') ||
     cat.includes('auricular') ||
     cat.includes('audifono') ||
-    texto.includes('auricular') ||
-    texto.includes('headset') ||
-    texto.includes('audifono') ||
-    texto.includes('audífono')
+    nombre.includes('auricular') ||
+    nombre.includes('headset') ||
+    nombre.includes('audifono') ||
+    nombre.includes('audífono')
   ) {
     return { id: 'audio', label: 'Audio / Auriculares', corto: 'Audio', grupo: 'Periféricos' };
   }
@@ -245,14 +249,13 @@ export const useComparadorStore = create<ComparadorState>()(
           return;
         }
 
-        // Si se elige un tipo diferente, cambiamos limpiamente a esa categoría sin mensajes intrusivos
+        // Bloqueo estricto: no se pueden mezclar categorías diferentes (ej. CPU con Motherboard o RAM)
         if (actuales.length > 0) {
           const tipoActual = obtenerTipoProducto(actuales[0]);
           const tipoNuevo = obtenerTipoProducto(producto);
 
           if (tipoActual.id !== tipoNuevo.id) {
-            set({ items: [producto] });
-            toast.info(`Comparando ${tipoNuevo.label}`);
+            toast.info(`Solo puedes comparar ${tipoActual.label}. Limpia el comparador para cambiar.`);
             return;
           }
         }

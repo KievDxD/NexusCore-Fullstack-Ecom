@@ -1,7 +1,7 @@
 import { useState, useMemo, useDeferredValue, useCallback, lazy, Suspense } from 'react';
 import TarjetaProducto from '../components/TarjetaProducto';
 import { useProductos } from '../hooks/useProductos';
-import { Loader2, Plus, Scale } from 'lucide-react';
+import { Loader2, Plus, Scale, Package } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useComparadorStore, obtenerTipoProducto, CATEGORIAS_PRODUCTO } from '../hooks/useComparador';
 import type { Producto } from '../types';
@@ -13,6 +13,7 @@ export default function Home() {
   const [busqueda, setBusqueda] = useState('');
   const [grupoActivo, setGrupoActivo] = useState<'Todos' | 'Componentes' | 'Periféricos'>('Todos');
   const [tipoActivo, setTipoActivo] = useState<string>('todos');
+  const [soloEnStock, setSoloEnStock] = useState(false);
   
   // 🆕 Usamos nuestro hook premium con soporte de fallback local y control de stock
   const { productos: productosDB, cargando } = useProductos();
@@ -63,6 +64,10 @@ export default function Home() {
         }
       }
 
+      if (soloEnStock && (producto.stock ?? 10) <= 0) {
+        return false;
+      }
+
       const coincideBusqueda =
         q === '' ||
         producto.nombre.toLowerCase().includes(q) ||
@@ -74,7 +79,7 @@ export default function Home() {
 
     // Los productos sin stock se van al final (sort estable: el resto conserva su orden)
     return filtrados.sort((a, b) => Number((a.stock ?? 10) === 0) - Number((b.stock ?? 10) === 0));
-  }, [productosDB, busquedaDiferida, grupoActivo, tipoActivo, tipoComparando]);
+  }, [productosDB, busquedaDiferida, grupoActivo, tipoActivo, tipoComparando, soloEnStock]);
 
   return (
     <div id="catalogo" className="space-y-6 animate-fade-in">
@@ -159,6 +164,19 @@ export default function Home() {
               <span>{sub.label}</span>
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setSoloEnStock((prev) => !prev)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 flex items-center gap-1.5 ml-auto border ${
+              soloEnStock
+                ? 'bg-emerald-500 text-white border-emerald-400 shadow-sm shadow-emerald-500/25'
+                : 'bg-themeCard/80 hover:bg-themeCard text-themeTextMuted hover:text-emerald-400 border border-themeBorder/60'
+            }`}
+            title={soloEnStock ? 'Mostrando solo productos con stock disponible' : 'Filtrar por productos en stock'}
+          >
+            <Package size={13} />
+            <span>{soloEnStock ? 'En Stock ✓' : 'Disponibilidad'}</span>
+          </button>
         </div>
       )}
 
@@ -201,7 +219,7 @@ export default function Home() {
             <p className="text-themeText font-medium text-lg">No encontramos resultados para tu búsqueda</p>
             <p className="text-themeTextMuted text-sm mt-1">Prueba revisando la ortografía o cambiando de categoría.</p>
             <button 
-              onClick={() => { setBusqueda(''); setGrupoActivo('Todos'); setTipoActivo('todos'); }}
+              onClick={() => { setBusqueda(''); setGrupoActivo('Todos'); setTipoActivo('todos'); setSoloEnStock(false); }}
               className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-themeAccent hover:bg-themeAccentHover rounded-lg transition-colors active:scale-95"
             >
               Restablecer filtros

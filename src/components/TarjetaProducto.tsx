@@ -171,6 +171,11 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
             ¡Últimas {stockDisponible} uds!
           </span>
         )}
+        {isAdmin && !sinStock && stockDisponible > 3 && (
+          <span className="bg-themeCard/90 text-emerald-400 border border-emerald-500/40 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md shadow backdrop-blur-sm self-start">
+            Stock: {stockDisponible}
+          </span>
+        )}
         {tieneDescuento && (
           <span
             className={`text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-xl flex items-center gap-1.5 self-start transition-all duration-300 hover:scale-110 ${badge.className}`}

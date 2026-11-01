@@ -3,6 +3,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
 import { useProductosStore } from '../hooks/useProductos';
 import { usePedidosStore } from '../hooks/usePedidos';
+import { CATEGORIAS_PRODUCTO } from '../hooks/useComparador';
 import type { EstadoPedido } from '../types';
 import {
   X,
@@ -18,6 +19,8 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  AlertTriangle,
+  Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -53,6 +56,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const productos = useProductosStore((s) => s.productos);
   const bulkUpdateStock = useProductosStore((s) => s.bulkUpdateStock);
   const bulkCategoryDiscount = useProductosStore((s) => s.bulkCategoryDiscount);
+  const actualizarProductoStore = useProductosStore((s) => s.actualizarProductoStore);
   const pedidos = usePedidosStore((s) => s.pedidos);
   const cargandoPedidos = usePedidosStore((s) => s.cargando);
   const fetchPedidos = usePedidosStore((s) => s.fetchPedidos);
@@ -61,6 +65,21 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [catDiscounts, setCatDiscounts] = useState<Record<string, number | ''>>({});
   const [bulkLoading, setBulkLoading] = useState<string | null>(null);
   const [procesandoPedidoId, setProcesandoPedidoId] = useState<string | null>(null);
+  const [customStock, setCustomStock] = useState<number | ''>(15);
+  const [restockLoadingId, setRestockLoadingId] = useState<number | null>(null);
+
+  const lowStockProducts = useMemo(() => {
+    return productos.filter((p) => (p.stock ?? 10) <= 3);
+  }, [productos]);
+
+  const categoriasDisponibles = useMemo(() => {
+    const setCats = new Set<string>();
+    productos.forEach((p) => {
+      if (p.categoria) setCats.add(p.categoria);
+    });
+    CATEGORIAS_PRODUCTO.forEach((c) => setCats.add(c.label));
+    return Array.from(setCats);
+  }, [productos]);
 
   const adminStats = useMemo(() => {
     let total = 0,
@@ -122,6 +141,37 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       toast.error('Error al restaurar inventario');
     }
     setBulkLoading(null);
+  };
+
+  const handleAplicarStockCustom = async () => {
+    if (customStock === '' || Number(customStock) < 0) {
+      toast.warning('Ingresa una cantidad de stock válida.');
+      return;
+    }
+    if (!confirm(`¿Fijar el stock en ${customStock} unidades para TODOS los productos del catálogo?`)) return;
+    setBulkLoading('custom');
+    try {
+      await bulkUpdateStock(Number(customStock));
+      toast.success(`Inventario global fijado en ${customStock} unidades por producto.`);
+    } catch {
+      toast.error('Error al actualizar el stock masivo');
+    }
+    setBulkLoading(null);
+  };
+
+  const handleQuickRestock = async (id: number, cantidadExtra: number) => {
+    const prod = productos.find((p) => p.id === id);
+    if (!prod) return;
+    const nuevo = (prod.stock ?? 0) + cantidadExtra;
+    setRestockLoadingId(id);
+    try {
+      await actualizarProductoStore(id, { stock: nuevo });
+      toast.success(`+${cantidadExtra} uds añadidas a ${prod.nombre} (Total: ${nuevo})`);
+    } catch {
+      toast.error('Error al reponer stock.');
+    } finally {
+      setRestockLoadingId(null);
+    }
   };
 
   const handleApplyCategoryDiscount = async (cat: string) => {
@@ -688,6 +738,65 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </section>
 
+              {/* PRODUCTOS CON STOCK CRÍTICO */}
+              {lowStockProducts.length > 0 && (
+                <section className="border-t border-themeBorder/40 pt-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black text-amber-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <AlertTriangle size={14} /> Stock Crítico / Agotados ({lowStockProducts.length})
+                    </h3>
+                  </div>
+
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                    {lowStockProducts.map((p) => {
+                      const cargandoEste = restockLoadingId === p.id;
+                      const sinStock = (p.stock ?? 0) === 0;
+                      return (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between gap-3 p-2.5 bg-themeInput/30 border border-themeBorder/60 rounded-xl text-xs"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img src={p.imagen} alt={p.nombre} className="w-9 h-9 rounded-lg object-cover bg-themeInput shrink-0" />
+                            <div className="min-w-0">
+                              <p className="font-bold text-themeText truncate max-w-[150px] sm:max-w-[200px]">{p.nombre}</p>
+                              <span
+                                className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                  sinStock ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                                }`}
+                              >
+                                {sinStock ? 'Agotado (0)' : `${p.stock} disponibles`}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickRestock(p.id, 5)}
+                              disabled={cargandoEste}
+                              className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1"
+                              title="Añadir 5 unidades de stock"
+                            >
+                              <Plus size={10} /> 5
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickRestock(p.id, 10)}
+                              disabled={cargandoEste}
+                              className="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1"
+                              title="Añadir 10 unidades de stock"
+                            >
+                              <Plus size={10} /> 10
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
               {/* WHATSAPP */}
               <section className="border-t border-themeBorder/40 pt-5">
                 <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">
@@ -715,8 +824,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">
                   Descuento por Categoría
                 </h3>
-                <div className="space-y-3">
-                  {['Componentes', 'Periféricos'].map((cat) => (
+                <div className="space-y-3 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                  {categoriasDisponibles.map((cat) => (
                     <div
                       key={cat}
                       className="flex items-center gap-3 bg-themeInput/30 border border-themeBorder/60 p-3.5 rounded-2xl"
@@ -763,7 +872,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               {/* ACCIONES MASIVAS */}
               <section className="border-t border-themeBorder/40 pt-5">
                 <h3 className="text-xs font-black text-themeText uppercase tracking-widest mb-3">Acciones Rápidas</h3>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 mb-3">
                   <button
                     onClick={handleAgotarTodo}
                     disabled={bulkLoading !== null}
@@ -783,6 +892,30 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <Package size={16} />
                     )}
                     Restaurar (10 uds)
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 bg-themeInput/30 border border-themeBorder/60 p-3 rounded-2xl">
+                  <span className="text-xs font-black text-themeText flex-1">Fijar stock global:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="999"
+                    value={customStock}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomStock(val === '' ? '' : Math.max(0, parseInt(val, 10) || 0));
+                    }}
+                    className="w-20 px-3 py-2 bg-themeInput border border-themeBorder rounded-xl text-themeText text-sm font-black text-center focus:outline-none focus:ring-2 focus:ring-themeAccent"
+                    placeholder="uds"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAplicarStockCustom}
+                    disabled={bulkLoading !== null || customStock === ''}
+                    className="bg-themeAccent hover:bg-themeAccentHover text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {bulkLoading === 'custom' ? <Loader2 size={14} className="animate-spin" /> : 'Aplicar'}
                   </button>
                 </div>
               </section>
