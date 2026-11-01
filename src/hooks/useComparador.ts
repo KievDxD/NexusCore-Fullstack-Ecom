@@ -5,6 +5,170 @@ import type { Producto } from '../types';
 
 const MAX_COMPARAR = 3;
 
+export interface TipoProductoInfo {
+  id: string;
+  label: string;
+}
+
+export function obtenerTipoProducto(p: Producto): TipoProductoInfo {
+  const specs = p.especificaciones ?? {};
+  const explicitSlot = (specs['tipo_componente'] || specs['slot'] || specs['tipo'] || '').toLowerCase().trim();
+  const texto = `${p.nombre} ${p.descripcion} ${p.categoria}`.toLowerCase();
+
+  // 1. Procesador / CPU
+  if (
+    explicitSlot === 'cpu' ||
+    explicitSlot === 'procesador' ||
+    texto.includes('procesador') ||
+    texto.includes('ryzen') ||
+    texto.includes('core i3') ||
+    texto.includes('core i5') ||
+    texto.includes('core i7') ||
+    texto.includes('core i9') ||
+    texto.includes('intel core') ||
+    (Boolean(specs['Zócalo']) && !texto.includes('tarjeta madre') && !texto.includes('motherboard') && !texto.includes('cooler') && !texto.includes('disipador'))
+  ) {
+    return { id: 'cpu', label: 'Procesadores (CPU)' };
+  }
+
+  // 2. Tarjeta Madre / Board
+  if (
+    explicitSlot === 'board' ||
+    explicitSlot === 'motherboard' ||
+    texto.includes('tarjeta madre') ||
+    texto.includes('motherboard') ||
+    texto.includes('placa madre') ||
+    texto.includes('placa base') ||
+    texto.includes('b550') ||
+    texto.includes('b650') ||
+    texto.includes('x670') ||
+    texto.includes('z790') ||
+    texto.includes('b760')
+  ) {
+    return { id: 'board', label: 'Tarjetas Madre' };
+  }
+
+  // 3. Memoria RAM
+  if (
+    explicitSlot === 'ram' ||
+    texto.includes('memoria ram') ||
+    texto.includes('ram ') ||
+    texto.includes('ddr4') ||
+    texto.includes('ddr5') ||
+    texto.includes('vengeance')
+  ) {
+    return { id: 'ram', label: 'Memorias RAM' };
+  }
+
+  // 4. Tarjeta Gráfica / GPU
+  if (
+    explicitSlot === 'gpu' ||
+    texto.includes('tarjeta gráfica') ||
+    texto.includes('tarjeta grafica') ||
+    texto.includes('placa de video') ||
+    texto.includes('rtx') ||
+    texto.includes('geforce') ||
+    texto.includes('radeon') ||
+    texto.includes('gtx')
+  ) {
+    return { id: 'gpu', label: 'Tarjetas Gráficas (GPU)' };
+  }
+
+  // 5. Almacenamiento SSD / HDD
+  if (
+    explicitSlot === 'storage' ||
+    texto.includes('ssd') ||
+    texto.includes('nvme') ||
+    texto.includes('m.2') ||
+    texto.includes('disco duro') ||
+    texto.includes('almacenamiento')
+  ) {
+    return { id: 'storage', label: 'Almacenamiento (SSD/HDD)' };
+  }
+
+  // 6. Refrigeración / Cooler
+  if (
+    explicitSlot === 'cooler' ||
+    texto.includes('cooler') ||
+    texto.includes('disipador') ||
+    texto.includes('noctua') ||
+    texto.includes('refrigeración') ||
+    texto.includes('refrigeracion') ||
+    texto.includes('líquida') ||
+    texto.includes('liquida')
+  ) {
+    return { id: 'cooler', label: 'Refrigeración (Coolers)' };
+  }
+
+  // 7. Fuente de Poder / PSU
+  if (
+    explicitSlot === 'psu' ||
+    texto.includes('fuente de poder') ||
+    texto.includes('fuente') ||
+    texto.includes('80 plus') ||
+    texto.includes('80+') ||
+    texto.includes('power supply')
+  ) {
+    return { id: 'psu', label: 'Fuentes de Poder (PSU)' };
+  }
+
+  // 8. Gabinete / Chasis
+  if (
+    explicitSlot === 'case' ||
+    texto.includes('gabinete') ||
+    texto.includes('chasis') ||
+    texto.includes('case') ||
+    texto.includes('nzxt h')
+  ) {
+    return { id: 'case', label: 'Gabinetes / Chasis' };
+  }
+
+  // 9. Teclado
+  if (
+    explicitSlot === 'teclado' ||
+    texto.includes('teclado') ||
+    texto.includes('keyboard')
+  ) {
+    return { id: 'teclado', label: 'Teclados' };
+  }
+
+  // 10. Mouse
+  if (
+    explicitSlot === 'mouse' ||
+    texto.includes('mouse') ||
+    texto.includes('ratón') ||
+    texto.includes('raton')
+  ) {
+    return { id: 'mouse', label: 'Mouses / Ratones' };
+  }
+
+  // 11. Monitor
+  if (
+    explicitSlot === 'monitor' ||
+    texto.includes('monitor') ||
+    texto.includes('pantalla')
+  ) {
+    return { id: 'monitor', label: 'Monitores' };
+  }
+
+  // 12. Audio
+  if (
+    explicitSlot === 'audio' ||
+    texto.includes('auricular') ||
+    texto.includes('headset') ||
+    texto.includes('audifono') ||
+    texto.includes('audífono')
+  ) {
+    return { id: 'audio', label: 'Audio / Auriculares' };
+  }
+
+  const cat = p.categoria?.trim() || 'Componentes';
+  return {
+    id: `cat_${cat.toLowerCase().replace(/\s+/g, '_')}`,
+    label: cat,
+  };
+}
+
 interface ComparadorState {
   items: Producto[];
   modalAbierto: boolean;
@@ -29,6 +193,28 @@ export const useComparadorStore = create<ComparadorState>()(
           return;
         }
 
+        // Restricción: comparar solo componentes del mismo tipo
+        if (actuales.length > 0) {
+          const tipoActual = obtenerTipoProducto(actuales[0]);
+          const tipoNuevo = obtenerTipoProducto(producto);
+
+          if (tipoActual.id !== tipoNuevo.id) {
+            toast.warning('Solo puedes comparar componentes del mismo tipo', {
+              description: `Actualmente comparas ${tipoActual.label}. No tiene sentido comparar con ${tipoNuevo.label}.`,
+              action: {
+                label: `Comparar ${tipoNuevo.label}`,
+                onClick: () => {
+                  set({ items: [producto] });
+                  toast.success(`Iniciando comparativa de ${tipoNuevo.label}`, {
+                    description: `1/${MAX_COMPARAR}: ${producto.nombre}`,
+                  });
+                },
+              },
+            });
+            return;
+          }
+        }
+
         if (actuales.length >= MAX_COMPARAR) {
           toast.warning(`Máximo ${MAX_COMPARAR} productos en el comparador`, {
             description: 'Quita uno de los productos seleccionados para agregar otro.',
@@ -37,9 +223,10 @@ export const useComparadorStore = create<ComparadorState>()(
         }
 
         const nuevos = [...actuales, producto];
+        const tipo = obtenerTipoProducto(producto);
         set({ items: nuevos });
         toast.success(`Agregado al comparador (${nuevos.length}/${MAX_COMPARAR})`, {
-          description: nuevos.length >= 2 ? '¡Ya puedes abrir la comparativa lado a lado!' : 'Selecciona al menos 1 producto más para comparar.',
+          description: nuevos.length >= 2 ? `¡Comparativa de ${tipo.label} lista para abrir!` : `Selecciona otro producto de ${tipo.label} para comparar.`,
         });
       },
 
@@ -54,6 +241,13 @@ export const useComparadorStore = create<ComparadorState>()(
     {
       name: 'nexus_comparador_v1',
       partialize: (state) => ({ items: state.items }),
+      onRehydrateStorage: () => (state) => {
+        // Sanitizar en rehidratación por si existían productos de tipos heterogéneos previos
+        if (state && state.items.length > 1) {
+          const primerTipo = obtenerTipoProducto(state.items[0]).id;
+          state.items = state.items.filter((item) => obtenerTipoProducto(item).id === primerTipo);
+        }
+      },
     }
   )
 );

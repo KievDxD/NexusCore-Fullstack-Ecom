@@ -8,7 +8,7 @@ import "./TarjetaProducto.css";
 import { toast } from "sonner";
 import type { Producto } from "../types";
 import { Pencil, Cpu, Scale } from "lucide-react";
-import { useComparadorStore } from "../hooks/useComparador";
+import { useComparadorStore, obtenerTipoProducto } from "../hooks/useComparador";
 
 interface TarjetaProductoProps {
   producto: Producto;
@@ -20,10 +20,15 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
   // Selectores granulares: la tarjeta solo se re-renderiza si cambia la cantidad de ESTE producto
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
   const enCarrito = useCantidadEnCarrito(producto.id);
-  const enComparador = useComparadorStore((s) => s.items.some((i) => i.id === producto.id));
+  const comparadorItems = useComparadorStore((s) => s.items);
+  const enComparador = comparadorItems.some((i) => i.id === producto.id);
   const toggleComparar = useComparadorStore((s) => s.toggleComparar);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
+
+  const tipoPrimerItem = comparadorItems.length > 0 ? obtenerTipoProducto(comparadorItems[0]) : null;
+  const tipoEste = obtenerTipoProducto(producto);
+  const esIncompatibleConComparador = Boolean(tipoPrimerItem && tipoPrimerItem.id !== tipoEste.id);
 
   const badge = getDiscountBadgeStyle(producto.descuento);
   const tieneDescuento = badge.tier !== 'none';
@@ -133,9 +138,17 @@ export default memo(function TarjetaProducto({ producto, isAdmin = false, onEdit
           className={`p-2 rounded-xl shadow-lg border transition-all active:scale-95 flex items-center justify-center cursor-pointer ${
             enComparador
               ? "bg-emerald-500 text-white border-emerald-400"
-              : "bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white border-themeBorder/80 hover:border-themeAccent"
+              : esIncompatibleConComparador
+                ? "bg-themeCard/60 hover:bg-amber-500/20 text-themeTextMuted/70 hover:text-amber-400 border-themeBorder/50"
+                : "bg-themeCard/90 hover:bg-themeAccent text-themeText hover:text-white border-themeBorder/80 hover:border-themeAccent"
           }`}
-          title={enComparador ? "Quitar del comparador" : "Comparar especificaciones"}
+          title={
+            enComparador
+              ? `Quitar del comparador (${tipoEste.label})`
+              : esIncompatibleConComparador
+                ? `Incompatible: comparando ${tipoPrimerItem?.label}. Clic para cambiar a ${tipoEste.label}.`
+                : `Comparar en ${tipoEste.label}`
+          }
         >
           <Scale size={13} />
         </button>

@@ -11,7 +11,7 @@ import { convertPrice, formatCurrency, precioConDescuento } from '../utils/curre
 import { getDiscountBadgeStyle } from '../utils/discount';
 import { Star, ShoppingCart, ArrowLeft, ZoomIn, X, Send, Calendar, AlertCircle, ChevronLeft, ChevronRight, Pencil, Cpu, Scale } from 'lucide-react';
 import { toast } from 'sonner';
-import { useComparadorStore } from '../hooks/useComparador';
+import { useComparadorStore, obtenerTipoProducto } from '../hooks/useComparador';
 
 const AdminProductoModal = lazy(() => import('../components/AdminProductoModal'));
 
@@ -31,7 +31,8 @@ export default function PaginaProducto() {
   const navigate = useNavigate();
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
   const enCarrito = useCantidadEnCarrito(Number(id));
-  const enComparador = useComparadorStore((s) => s.items.some((i) => i.id === Number(id)));
+  const comparadorItems = useComparadorStore((s) => s.items);
+  const enComparador = comparadorItems.some((i) => i.id === Number(id));
   const toggleComparar = useComparadorStore((s) => s.toggleComparar);
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
@@ -454,18 +455,34 @@ export default function PaginaProducto() {
                 {producto.marca || 'NEXUS'}
               </span>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => toggleComparar(producto)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 border text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer ${
-                    enComparador
-                      ? 'bg-emerald-500 border-emerald-400 text-white'
-                      : 'bg-themeInput border-themeBorder hover:border-themeAccent text-themeTextMuted hover:text-themeText'
-                  }`}
-                >
-                  <Scale size={11} />
-                  {enComparador ? 'En Comparador' : 'Comparar'}
-                </button>
+                {(() => {
+                  const tipoPrimerItem = comparadorItems.length > 0 ? obtenerTipoProducto(comparadorItems[0]) : null;
+                  const tipoEste = obtenerTipoProducto(producto);
+                  const esIncompatible = Boolean(tipoPrimerItem && tipoPrimerItem.id !== tipoEste.id);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => toggleComparar(producto)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 border text-[10px] font-black uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer ${
+                        enComparador
+                          ? 'bg-emerald-500 border-emerald-400 text-white'
+                          : esIncompatible
+                            ? 'bg-themeInput/60 border-themeBorder/60 hover:border-amber-500 text-themeTextMuted hover:text-amber-400'
+                            : 'bg-themeInput border-themeBorder hover:border-themeAccent text-themeTextMuted hover:text-themeText'
+                      }`}
+                      title={
+                        enComparador
+                          ? `Quitar del comparador (${tipoEste.label})`
+                          : esIncompatible
+                            ? `Incompatible: comparando ${tipoPrimerItem?.label}. Clic para cambiar a ${tipoEste.label}.`
+                            : `Comparar en ${tipoEste.label}`
+                      }
+                    >
+                      <Scale size={11} />
+                      {enComparador ? 'En Comparador' : `Comparar (${tipoEste.label})`}
+                    </button>
+                  );
+                })()}
                 {isAdmin && (
                   <button
                     onClick={() => setModalEditOpen(true)}

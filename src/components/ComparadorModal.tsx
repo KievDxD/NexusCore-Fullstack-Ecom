@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Scale, X, Trash2, Trophy, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
-import { useComparadorStore, obtenerIndicesGanadores } from '../hooks/useComparador';
+import { useComparadorStore, obtenerIndicesGanadores, obtenerTipoProducto } from '../hooks/useComparador';
 import { useSettings } from '../hooks/useSettings';
 import { useCarritoStore } from '../hooks/useCarrito';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
@@ -17,6 +17,11 @@ export default function ComparadorModal() {
   const currency = useSettings((s) => s.currency);
   const rates = useSettings((s) => s.rates);
   const agregarProducto = useCarritoStore((s) => s.agregarProducto);
+
+  const tipoActual = useMemo(
+    () => (items.length > 0 ? obtenerTipoProducto(items[0]) : null),
+    [items]
+  );
 
   // Recolectar todas las llaves de especificaciones técnicas de los productos seleccionados
   const clavesSpecs = useMemo(() => {
@@ -50,6 +55,11 @@ export default function ComparadorModal() {
             <div className="w-9 h-9 rounded-xl bg-themeAccent/15 text-themeAccent flex items-center justify-center shrink-0">
               <Scale size={18} />
             </div>
+            {tipoActual && (
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-lg bg-themeAccent/10 text-themeAccent text-[10px] font-black uppercase tracking-wider shrink-0 border border-themeAccent/20">
+                {tipoActual.label}
+              </span>
+            )}
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
               {items.map((prod) => (
                 <div
@@ -111,11 +121,18 @@ export default function ComparadorModal() {
                   <Scale size={20} />
                 </div>
                 <div>
-                  <h2 className="text-sm sm:text-lg font-black uppercase tracking-tight text-themeText">
-                    Comparador Técnico Lado a Lado
-                  </h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-sm sm:text-lg font-black uppercase tracking-tight text-themeText">
+                      Comparador Técnico Lado a Lado
+                    </h2>
+                    {tipoActual && (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg bg-themeAccent/15 text-themeAccent border border-themeAccent/30">
+                        {tipoActual.label}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] sm:text-xs text-themeTextMuted font-semibold">
-                    Las celdas resaltadas en <span className="text-emerald-400 font-black">verde</span> indican la ventaja técnica o mejor precio
+                    Comparación exclusiva entre {tipoActual?.label.toLowerCase() || 'componentes del mismo tipo'} · Celdas en <span className="text-emerald-400 font-black">verde</span> indican ventaja técnica o mejor precio
                   </p>
                 </div>
               </div>
