@@ -1,273 +1,144 @@
-# NEXUS // CORE — High-Performance Hardware Commerce & Architecture Platform
+# NEXUS // CORE — High-Performance Hardware Commerce & AI Architecture Platform
 
-> **NEXUS // CORE** es una solución integral de ingeniería de software para comercio electrónico de hardware de cómputo de alta gama. Resuelve de raíz los tres mayores puntos de fricción en la venta de tecnología en América Latina: el temor del comprador a adquirir piezas incompatibles, los pedidos fantasma que congelan el inventario sin pagarse, y la fricción de pagos digitales frente al canal de mayor conversión en la región: WhatsApp.
+> [🇪🇸 Leer documentación en Español](./README.es.md)
 
----
-
-## 📖 ¿Qué es NEXUS // CORE y qué problema resuelve?
-
-En el mercado minorista de tecnología y componentes de computación, el cliente promedio enfrenta barreras significativas:
-1. **Miedo a la Incompatibilidad:** Comprar un procesador con socket incompatible con la placa madre, memorias DDR5 en boards DDR4, o una fuente de poder insuficiente para una GPU moderna.
-2. **Falta de Claridad Técnica:** Comparar especificaciones complejas (frecuencias, latencias, VRAM, TDP) en pestañas separadas de navegador genera fatiga de decisión y abandono del carrito.
-3. **El Dilema del Checkout:** Si el comercio redirige directamente a WhatsApp, el inventario no se descuenta automáticamente; si se descuenta de inmediato sin pasarela, cualquier usuario puede vaciar el stock de la tienda sin pagar.
-4. **Barreras de Pago Locales:** Forzar a un cliente a pasarelas bancarias rígidas reduce la conversión de quienes prefieren contraentrega, transferencias directas por Nequi o asesoría en tiempo real.
-
-**NEXUS // CORE** nace como un ecosistema unificado que combina:
-- Un **Armador Interactivo de PC** con verificador algorítmico de compatibilidad física y balance energético en tiempo real.
-- Un **Comparador Técnico Lado a Lado** con motor heurístico de selección que resalta automáticamente la ventaja técnica y de costo.
-- Una **Capa Transaccional Concurrente en PostgreSQL (Supabase)** que bloquea el stock de forma atómica con reversión automática mediante triggers ante pedidos cancelados.
-- Un **Checkout Híbrido** que permite pagar de inmediato con simulación digital de **Wompi Sandbox (Nequi, PSE, Tarjeta)** o generar un pedido formal y coordinar por **WhatsApp**.
-- Un **Panel de Administración en Vivo** con control no destructivo de catálogo, galerías de medios y monitoreo de reservas.
+**NEXUS // CORE (V2.0 Enterprise)** is a full-stack e-commerce and PC architecture platform engineered with **React 18, TypeScript, Zustand, Supabase PostgreSQL 15, and Deno Edge Functions**. It solves the highest-friction engineering bottlenecks in high-ticket PC hardware retail: physical/power compatibility errors, CPU/GPU architecture bottlenecks, race conditions during concurrent stock reservations, duplicate webhook retries, and non-destructive catalog administration.
 
 ---
 
-## 🏛️ Diagrama de Arquitectura del Sistema
+## 🏗️ System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Cliente["Frontend SPA (React 18 + Vite + TypeScript)"]
-        UI["Catálogo & Tarjetas"]
-        Builder["PC Builder (usePCBuilderStore)"]
-        Compare["Comparador Lado a Lado (useComparadorStore)"]
-        Cart["Carrito & Checkout (useCarritoStore)"]
-        Auth["Sesión Persistida (AuthContext)"]
+    subgraph Client["Frontend SPA (React 18 + Vite + TypeScript + Zustand)"]
+        Catalog["Catalog & Isolated Filter Bar"]
+        Builder["PC Builder + 1-Click AI Swap (usePCBuilderStore)"]
+        Comparator["Side-by-Side Heuristic Comparator (useComparadorStore)"]
+        Checkout["Idempotent Cart + 1-Click QA Demo (usePedidosStore)"]
+        Auth["Persisted Auth & RBAC (AuthContext)"]
     end
 
-    subgraph Backend["Plataforma Backend & Base de Datos (Supabase)"]
+    subgraph Backend["Supabase Platform (PostgreSQL 15 + Deno Edge Functions)"]
         DB[("PostgreSQL 15")]
-        RPC_Order["crear_pedido_y_reservar_stock (FOR UPDATE)"]
-        RPC_State["cambiar_estado_pedido"]
+        RPC_Reserve["crear_pedido_y_reservar_stock (FOR UPDATE + idempotency_key)"]
+        RPC_State["cambiar_estado_pedido (FOR UPDATE Idempotent)"]
         Trigger["Trigger: fn_restaurar_stock_pedido_cancelado"]
-        RLS["Row Level Security Endurecido"]
-        EdgeFn["Edge Function: wompi-webhook"]
+        RLS["Hardened Row Level Security"]
+        Edge_Wompi["Edge Function: wompi-webhook (Idempotent Deduplication)"]
+        Edge_AI["Edge Function: analizar-ensamble (Structured JSON + Heuristic Fallback)"]
     end
 
-    subgraph Canales["Canales de Pago y Notificación"]
-        Wompi["Wompi Sandbox (Nequi / PSE / Card)"]
-        WA["WhatsApp Business API / Enlace Dinámico"]
+    subgraph PaymentChannels["Payment & Order Channels"]
+        Wompi["Wompi Sandbox (Nequi / PSE / Card + SHA-256)"]
+        WhatsApp["WhatsApp Dynamic Order Dispatch"]
     end
 
-    UI --> Compare
-    UI --> Builder
-    Builder -->|Ensamble Compatible| Cart
-    Cart -->|Reserva Atómica| RPC_Order
-    RPC_Order -->|Bloqueo de fila y descuento| DB
-    Cart -->|Modo WhatsApp| WA
-    Cart -->|Modo Digital| Wompi
-    Wompi -->|Webhook SHA-256| EdgeFn
-    EdgeFn --> RPC_State
+    Catalog --> Comparator
+    Catalog --> Builder
+    Builder <-->|Live Stock JSON Payload| Edge_AI
+    Builder -->|Verified Build| Checkout
+    Checkout -->|Atomic Reserve + UUID Key| RPC_Reserve
+    RPC_Reserve -->|Row Lock & Stock Deduction| DB
+    Checkout -->|WhatsApp Flow| WhatsApp
+    Checkout -->|Digital Flow| Wompi
+    Wompi -->|Retry-Safe Webhook| Edge_Wompi
+    Edge_Wompi -->|Pre-Flight State Check| DB
+    Edge_Wompi --> RPC_State
     RPC_State --> Trigger
-    Trigger -->|Devuelve Stock si Cancelado| DB
+    Trigger -->|Auto-Restore Stock on Cancel| DB
     Auth --> RLS
 ```
 
 ---
 
-## 💎 Módulos del Sistema en Detalle
+## ⚙️ Core Engineering Capabilities
 
-### 1. 🛠️ Armador de PC Interactivo ("PC Builder")
-Diseñado para eliminar la incertidumbre del armado:
-- **Flujo Guiado Paso a Paso:** CPU $\rightarrow$ Motherboard $\rightarrow$ Memoria RAM $\rightarrow$ GPU $\rightarrow$ Almacenamiento SSD $\rightarrow$ Refrigeración CPU $\rightarrow$ Gabinete $\rightarrow$ Fuente de Poder (PSU).
-- **Motor de Compatibilidad en Memoria (`usePCBuilderStore`):**
-  - **Socket Matching:** Cruza procesadores y placas madre (`AM5`, `AM4`, `LGA1700`, `LGA1200`).
-  - **Memory Generation:** Filtra exclusivamente módulos compatibles (`DDR5` vs `DDR4`).
-  - **Form Factor Guard:** Valida que el factor de forma de la tarjeta madre (`ATX`, `Micro-ATX`, `Mini-ITX`) sea soportado por el chasis.
-  - **Cooler Bracket Compatibility:** Comprueba compatibilidad declarada de anclaje térmico.
-- **Balance y Medidor Energético Dinámico:**
-  $$\text{TDP Total Estimado} = \sum \text{TDP de componentes seleccionados}$$
-  $$\text{Fuente Recomendada} = \text{MúltiploSuperior50}\left( (\text{TDP Total} + 40\text{W base}) \times 1.25 \right)$$
-  Si el usuario selecciona una fuente con potencia nominal inferior al umbral seguro, el sistema emite una advertencia visual bloqueante.
+### 1. Concurrent PostgreSQL Row-Level Locking (`FOR UPDATE`) & Transactional Idempotency
+Traditional client-side stock checks fail under concurrent checkouts and network retries. **NEXUS // CORE** guarantees ACID inventory correctness directly in PostgreSQL:
+- **Row-Level Locks (`FOR UPDATE`):** `public.crear_pedido_y_reservar_stock` locks target rows in `public.productos`, verifies `stock >= requested_quantity`, deducts inventory atomically, and inserts the order in a single database transaction—eliminating overselling.
+- **Advisory Serialization + `idempotency_key`:** Every checkout attempt sends a client-generated UUID v4 (`idempotency_key uuid UNIQUE` on `public.pedidos`). The RPC acquires `pg_advisory_xact_lock(hashtext(p_idempotency_key::text))` and short-circuits duplicate submissions or double-clicks by returning the existing order without deducting stock twice.
+- **Automatic Stock Reversal Trigger (`fn_restaurar_stock_pedido_cancelado`):** When an order transitions from `pendiente` to `cancelado`, a `BEFORE UPDATE OF estado` database trigger automatically restores all reserved item quantities back to `public.productos`.
+- **Zero-Downtime Backward Compatibility:** `usePedidosStore` deduplicates in-flight requests per idempotency key and gracefully detects older 5-parameter database schemas if the V2.0 migration has not been applied yet.
 
----
+### 2. Idempotent Payment Webhooks & Wompi Sandbox Gateway
+- **Client-Side SHA-256 Integrity Signing:** Generates Wompi integrity hashes (`SHA256(Reference + AmountInCents + Currency + IntegritySecret)`) natively via the browser Web Crypto API (`generarFirmaIntegridadWompi`).
+- **Retry-Tolerant Edge Function (`supabase/functions/wompi-webhook`):**
+  - Verifies optional `WOMPI_EVENTS_SECRET` SHA-256 event signatures.
+  - Deduplicates rapid in-memory webhook retries via `${transaction.id}:${transaction.status}` tracking.
+  - Executes a pre-flight query on `public.pedidos` (`id, estado, referencia_pago`) and locks the row inside `cambiar_estado_pedido` (`FOR UPDATE`), making duplicate webhook deliveries strictly no-op after completion.
+- **1-Click Demo Checkout Experience:** Both `CarritoSidebar` and `WompiCheckoutModal` feature a subtle **"Rellenar datos de prueba"** button so reviewers can execute the full end-to-end flow (*Atomic Reservation $\rightarrow$ Wompi Sandbox $\rightarrow$ Webhook/RPC Transition $\rightarrow$ Live Stock Deduction or Reversal*) in under 5 seconds.
 
-### 2. ⚖️ Comparador Técnico Lado a Lado (Side-by-Side)
-- Permite seleccionar de 2 a 3 componentes o periféricos del catálogo.
-- **Detección Heurística Anti-Colisiones:**
-  - Clasificación granular estricta (`cpu`, `gpu`, `ram`, `storage`, `board`, `psu`, `case`, `cooler`, `teclado`, `mouse`, `monitor`, `audio`).
-  - Prioridad de evaluación: Placas madre y disipadores se verifican antes que procesadores (por chipsets y descripciones), garantizando que tarjetas madre que mencionen *"Ryzen"* o *"Intel Core"* no se clasifiquen jamás como CPU.
-  - Bloqueo tajante de comparaciones incompatibles entre distintos tipos de hardware con advertencia informativa no intrusiva.
-- **Resaltado Inteligente Heurístico (`obtenerIndicesGanadores`):**
-  - Evalúa numéricamente cada especificación técnica y destaca en **verde esmeralda** la mejor alternativa:
-    - *Menor valor gana:* Precio final, latencia CAS (CL), tiempo de respuesta (ms), consumo energético (TDP) y nivel de ruido (dB).
-    - *Mayor valor gana:* Frecuencias base/turbo (GHz/MHz), memoria de video (VRAM GB), núcleos/hilos, capacidad de almacenamiento (GB/TB), tasa de refresco (Hz), DPI y potencia (W).
-- Barra de estado flotante no intrusiva y modal responsive con inyección directa al carrito.
+### 3. AI Hardware Bottleneck Advisor & Interactive PC Builder (`analizar-ensamble`)
+- **Step-by-Step Compatibility Engine (`usePCBuilderStore`):** Enforces socket matching (`AM5`, `AM4`, `LGA1700`, `LGA1200`), memory standard alignment (`DDR4` vs `DDR5`), chassis form factor clearances (`ATX`, `Micro-ATX`, `Mini-ITX`), and real-time wattage headroom calculations ($(\text{TDP} + 40\text{W}) \times 1.25$).
+- **Live Inventory AI Architect (`supabase/functions/analizar-ensamble`):**
+  - **Structured JSON Outputs:** Evaluates CPU/GPU tier symmetry, PSU transient power headroom, RAM dual-channel configuration, and high-TDP thermal cooling requirements via LLM (`GEMINI_API_KEY` or `OPENAI_API_KEY`).
+  - **Zero-Hallucination Stock Guard:** Every `producto_sugerido_id` returned by an LLM is strictly cross-checked against live catalog items with `stock > 0` and verified for socket/RAM compatibility before reaching the UI.
+  - **Sub-50ms Deterministic Fallback:** When no LLM API key is configured (or on upstream timeout), the Edge Function and client (`analizarEnsambleDeterministico`) run a deterministic heuristic hardware scoring engine so diagnostics never fail.
+  - **1-Click Live Swap:** Displays up to 2 real in-stock catalog upgrades inside the flagship **NEXUS AI // ARCHITECT** card with instant **Swap 1-Click** replacement.
 
----
-
-### 3. 📦 Reserva Concurrente de Stock, Control Crítico y Gestión de Pedidos (RPC)
-- **Eliminación de Bucles y Sobreventa en Carrito:**
-  - Si el usuario añade unidades hasta el tope disponible (`enCarrito + cant >= stock`), el sistema desactiva el botón de incremento, cambia el estado visual a inactivo y emite una alerta informativa inmediata.
-- **Módulo de Stock Crítico y Reposición Rápida (`SettingsModal`):**
-  - Identificación automática de productos con stock $\le 3$ unidades o agotados.
-  - Reposición instantánea de +5 o +10 unidades con persistencia atómica en base de datos.
-  - Fijación masiva de inventario global y descuentos porcentuales dinámicos por categoría.
-- **Filtro de Disponibilidad Rápida en Catálogo (`Home`):**
-  - Toggle `soloEnStock` anclado con estado visual esmeralda y sincronización con el comparador.
-- **Transacción Atómica en PostgreSQL (`crear_pedido_y_reservar_stock`):**
-  - Utiliza `FOR UPDATE` para bloquear concurrentemente las filas en `public.productos`.
-  - Verifica que cada ítem cuente con `stock >= cantidad_solicitada`.
-  - Descuenta el stock de forma atómica y genera la orden en `public.pedidos` en estado `pendiente`.
-- **Trigger de Reversión Automática (`trg_restaurar_stock_pedido`):**
-  - Si una orden pasa de `pendiente` a `cancelado` (por decisión del administrador o por rechazo en pasarela), la base de datos reincorpora de inmediato las unidades a cada producto sin intervención manual.
+### 4. Collision-Free Heuristic Comparator & Non-Destructive Admin Staging
+- **Strict Component Isolation (`useComparadorStore`):** Evaluates motherboards (`Chipset`, form factor, chipset families) and coolers prior to CPUs in `obtenerTipoProducto`, preventing motherboards that mention *"AMD Ryzen"* in descriptions from ever matching CPU comparisons.
+- **Automated Spec Winner Highlighting (`obtenerIndicesGanadores`):** Highlights best price, lowest latency/response time, highest VRAM/frequency/refresh rate/wattage side-by-side.
+- **Non-Destructive Media Staging (`AdminProductoModal`):** Admins can stage primary or gallery images for deletion (previewed in grayscale) and restore them at will; storage/database mutations only commit on save. Includes hierarchical `Componentes` / `Periféricos` selectors and critical stock quick-restock (`+5` / `+10` units) in `SettingsModal`.
+- **Viewport-Isolated Category Filtering (`Home.tsx`):** Styled custom horizontal scrollbar (`.custom-h-scrollbar`), lateral navigation buttons, and non-passive wheel listeners (`data-lenis-prevent="true"`, `overscroll-contain`) isolate category scrolling without moving the vertical page viewport.
 
 ---
 
-### 4. 💳 Pasarela Digital Wompi Sandbox con Firma Criptográfica
-- **Firma de Integridad SHA-256 en Cliente:**
-  $$\text{Firma} = \text{SHA256}(\text{ReferenciaPedido} + \text{MontoEnCentavos} + \text{'COP'} + \text{IntegritySecret})$$
-  Calculada mediante la API nativa `crypto.subtle` del navegador.
-- **Simulador Interactivo de Checkout:** Permite emular transacciones con Nequi, PSE y Tarjetas de crédito/débito para pruebas completas de aceptación (`APPROVED`) o rechazo (`DECLINED`).
-- **Supabase Edge Function (`wompi-webhook`):**
-  - Endpoint seguro en Deno Runtime que recibe eventos de Wompi, valida el checksum y ejecuta `cambiar_estado_pedido`.
+## 🗄️ Database Schema & Migration Guide (Supabase)
 
----
+### Applying SQL Migrations
+Run the migration files inside your Supabase project's **SQL Editor** in chronological order (or push with `supabase db push`):
 
-### 5. 🛡️ Panel de Administración y Gestión No Destructiva de Medios
-- **Edición en Portal (`createPortal`):** Resuelve el problema clásico de modales atrapados en contenedores con transformaciones CSS, garantizando proporciones óptimas y cero scrolls innecesarios.
-- **Categorización Jerárquica Limpia (`AdminProductoModal`):**
-  - Selector dual en dos niveles: Grupo Principal (`Componentes` vs `Periféricos`) + Subcategoría contextual a ancho completo.
-  - Elimina desbordes de texto ("Otros Componen...") y desorganización de menús nativos apiñados.
-- **Navegación en 3 Pestañas Rápidas:**
-  1. *General:* Imagen principal compacta, identificación, precio, stock y descuento en una sola vista.
-  2. *Ficha Técnica:* Descripción extendida y editor dinámico clave-valor de especificaciones.
-  3. *Galería:* Gestión de imágenes adicionales.
-- **Staging de Eliminación de Imágenes (Deshacer / Restaurar):**
-  - Pulsar eliminar atenúa la imagen (`grayscale opacity-30`), muestra la etiqueta *"Marcada para eliminar"* y habilita el botón **"Restaurar"**.
-  - No muta el almacenamiento ni la base de datos hasta que el administrador confirma con **"Guardar Cambios"**.
-- **Gestor de Pedidos de Administrador:** Visualización en vivo de pedidos pendientes, pagados y cancelados, con botones de un solo toque para liquidar o devolver stock.
+1. `supabase/migrations/20240101000000_initial_schema.sql` *(base products, reviews, profiles, RLS)*
+2. `supabase/migrations/20261027_security_hardening.sql` *(hardened RLS policies & `is_admin()` guard)*
+3. `supabase/migrations/20261028000000_performance_and_rpc.sql` *(indexed queries & catalog RPCs)*
+4. `supabase/migrations/20261028010000_orders_and_pc_builder.sql` *(`pedidos` table, `FOR UPDATE` reservation, auto-restore trigger)*
+5. **`supabase/migrations/20261115000000_idempotency_and_ai_advisor.sql`** *(adds `idempotency_key uuid UNIQUE`, `pg_advisory_xact_lock`, and idempotent `cambiar_estado_pedido`)*
 
----
+### Deploying Edge Functions (Optional Cloud Functions)
+```bash
+# Deploy Edge Functions to Supabase
+supabase functions deploy wompi-webhook
+supabase functions deploy analizar-ensamble
 
-### 6. 🌐 Multimoneda de Precisión y Badges Progresivos
-- **Motor de Conversión:** Soporta **COP**, **USD** y **MXN** con actualización periódica de tasas oficiales.
-- **Badges de Descuento Dinámicos:**
-  - *1% – 15% (Bajo):* Gradiente esmeralda-turquesa con insignia `✨ OFERTA`.
-  - *16% – 35% (Medio):* Gradiente animado ámbar-naranja-rosa con `⚡ SÚPER OFERTA`.
-  - *> 35% (Alto):* Gradiente neón de alto impacto con efecto `🔥 PRECIO BOMBA` y píldora `HOT`.
-
----
-
-### 7. ⚡ Rendimiento, Navegación de Filtros y CI/CD Keep-Alive
-- **Navegación Horizontal Aislada de Categorías (`Home.tsx`):**
-  - Barra de desplazamiento personalizada (`.custom-h-scrollbar`) de 6px adaptada al tema activo.
-  - Controles de desplazamiento lateral (`ChevronLeft` / `ChevronRight`) y wheel horizontal no intrusivo.
-  - **Fijación de Viewport:** Aislamiento mediante `data-lenis-prevent="true"`, `overscroll-contain` y listeners no pasivos (`passive: false`) con `preventDefault()`, impidiendo que rodar el ratón sobre las categorías mueva la página verticalmente.
-- **Sin Flash en Recarga (`F5`):** `AuthContext` sincroniza el perfil y permisos de administrador en caché local segura, evitando que la interfaz monte temporalmente vistas de usuario raso mientras valida la sesión con Supabase.
-- **Cero Imágenes Extrañas en Carga Inicial:** El catálogo hidrata desde el almacenamiento local validado (`nexus_catalog_cache_v2`) y muestra skeletons nativos con `<Cpu />` hasta que la imagen real termina de descargar (`onLoad`), impidiendo el parpadeo de imágenes genéricas de muestra.
-- **GitHub Actions Keep-Alive (`supabase-keepalive-ci.yml`):**
-  - Se ejecuta automáticamente cada 3 días (`cron: '0 8 */3 * *'`).
-  - Realiza un ping REST a la base de datos para impedir que Supabase pause el proyecto gratuito por inactividad.
-  - Ejecuta `npm run lint` y `npm run build` en cada commit o pull request para garantizar que no existan errores de TypeScript que rompan los despliegues en Vercel.
-
----
-
-## 🗄️ Esquema de Base de Datos (PostgreSQL)
-
-```sql
--- Tablas Principales
-public.productos (
-  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  nombre text NOT NULL,
-  precio numeric NOT NULL,
-  imagen text NOT NULL,
-  categoria text NOT NULL,
-  descripcion text NOT NULL,
-  descripcion_larga text,
-  stock integer NOT NULL DEFAULT 0,
-  descuento integer DEFAULT 0,
-  especificaciones jsonb,
-  specs jsonb,
-  marca text,
-  created_at timestamptz DEFAULT now()
-);
-
-public.producto_imagenes (
-  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  producto_id bigint REFERENCES public.productos(id) ON DELETE CASCADE,
-  url text NOT NULL,
-  orden integer DEFAULT 0
-);
-
-public.pedidos (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  cliente_nombre text NOT NULL,
-  cliente_telefono text NOT NULL,
-  metodo_pago text CHECK (metodo_pago IN ('whatsapp', 'wompi')),
-  moneda text NOT NULL DEFAULT 'COP',
-  total numeric NOT NULL,
-  estado text DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'pagado', 'cancelado')),
-  referencia_pago text,
-  items jsonb NOT NULL,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
-
-public.resenas (
-  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  producto_id bigint REFERENCES public.productos(id) ON DELETE CASCADE,
-  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-  puntuacion integer CHECK (puntuacion BETWEEN 1 AND 5),
-  comentario text,
-  created_at timestamptz DEFAULT now()
-);
-
-public.profiles (
-  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  role text DEFAULT 'usuario' CHECK (role IN ('admin', 'usuario')),
-  username text UNIQUE,
-  avatar_url text,
-  created_at timestamptz DEFAULT now()
-);
+# Optional LLM & Webhook Secrets
+supabase secrets set GEMINI_API_KEY=your_key_here
+supabase secrets set WOMPI_EVENTS_SECRET=your_wompi_events_secret
 ```
+> **Note:** Both `analizar-ensamble` and client checkout operate smoothly even without external AI API keys thanks to the built-in deterministic heuristic engine and backward-compatible RPC handlers.
 
 ---
 
-## 🛠️ Tecnologías y Librerías
+## 🚀 Local Setup & Verification
 
-- **Framework Web:** React 18, React DOM, React Router DOM v6
-- **Tipado & Compilación:** TypeScript 5.5+, Vite 8.3+
-- **Estilos & Animaciones:** Tailwind CSS 3, animaciones de gradientes y modales
-- **Estado Global & Persistencia:** Zustand 5 con middleware `persist`
-- **Iconografía & Notificaciones:** Lucide React, Sonner Toast Provider
-- **Smooth Scrolling:** Lenis Scroll con compatibilidad de modales (`data-lenis-prevent`)
-- **Backend as a Service:** Supabase JS SDK v2, PostgreSQL 15, Deno Edge Functions
-- **Integración Financiera:** Wompi Colombia (Integridad criptográfica Web Crypto SHA-256)
-
----
-
-## 🚀 Despliegue y Puesta en Marcha
-
-### 1. Variables de Entorno (`.env`)
+### 1. Environment Variables (`.env`)
 ```env
-VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
-VITE_SUPABASE_ANON_KEY=tu-anon-key-de-supabase
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 
-# Pasarela Wompi Sandbox (Opcional para pruebas de pago digital)
+# Wompi Sandbox Gateway (Defaults included for local QA)
 VITE_WOMPI_PUBLIC_KEY=pub_test_NexusCoreSandboxCol
 VITE_WOMPI_INTEGRITY_SECRET=test_integrity_nexuscore_sandbox_secret
 ```
 
-### 2. Comandos de Terminal
+### 2. Run & Verify
 ```bash
-# Instalar dependencias
+# Install dependencies
 npm install
 
-# Iniciar servidor local de desarrollo
+# Start Vite development server
 npm run dev
 
-# Validar estándares y calidad de código
+# Strict ESLint check (must exit 0)
 npm run lint
 
-# Compilación de producción y comprobación estricta de TypeScript
+# Strict TypeScript compilation (tsc -b) + Vite production bundle
 npm run build
-
-# Previsualizar bundle de producción localmente
-npm run preview
 ```
 
 ---
 
-## 📜 Licencia y Autoría
-
-Desarrollado bajo arquitectura orientada a rendimiento y confiabilidad por el equipo de **NEXUS // CORE**. Listo para despliegue automatizado y continuo en plataformas cloud modernas como **Vercel** y **Supabase**.
+## 🛠️ Tech Stack
+- **Frontend:** React 18, TypeScript 5, Vite 8, Tailwind CSS 3, Zustand 5, React Router DOM v6, Lenis Smooth Scroll, Lucide Icons, Sonner
+- **Backend / Database:** Supabase PostgreSQL 15, PL/pgSQL Transactional RPCs, Row Level Security (RLS), Deno Edge Functions
+- **Payments & AI:** Wompi Colombia Sandbox (Web Crypto SHA-256), Structured JSON Hardware Advisor (Gemini/OpenAI + Deterministic Engine)

@@ -1,10 +1,10 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useRef, lazy, Suspense } from 'react';
 import { useCarrito } from '../hooks/useCarrito';
 import { useSettings } from '../hooks/useSettings';
 import { useAuth } from '../context/AuthContext';
-import { usePedidosStore } from '../hooks/usePedidos';
+import { usePedidosStore, generarIdempotencyKey } from '../hooks/usePedidos';
 import { convertPrice, formatCurrency, precioConDescuento } from '../utils/currency';
-import { X, Trash2, ShoppingBag, Loader2, ShieldCheck, MessageCircle } from 'lucide-react';
+import { X, Trash2, ShoppingBag, Loader2, ShieldCheck, MessageCircle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Pedido } from '../types';
 
@@ -31,13 +31,44 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
   const [clienteTelefono, setClienteTelefono] = useState('');
   const [pedidoWompiActivo, setPedidoWompiActivo] = useState<Pedido | null>(null);
 
+  const idempotencyRef = useRef<{ fingerprint: string; key: string }>({
+    fingerprint: '',
+    key: generarIdempotencyKey(),
+  });
+
+  const obtenerClaveIdempotencia = () => {
+    const fingerprintActual = `${items.map((i) => `${i.id}:${i.cantidad}`).join('|')}:${currency}:${clienteNombre.trim()}:${clienteTelefono.trim()}`;
+    if (idempotencyRef.current.fingerprint !== fingerprintActual) {
+      idempotencyRef.current = {
+        fingerprint: fingerprintActual,
+        key: generarIdempotencyKey(),
+      };
+    }
+    return idempotencyRef.current.key;
+  };
+
+  const resetIdempotencyKey = () => {
+    idempotencyRef.current = {
+      fingerprint: '',
+      key: generarIdempotencyKey(),
+    };
+  };
+
+  const handleRellenarDatosPrueba = () => {
+    setClienteNombre('Alex Rivera · Demo QA');
+    setClienteTelefono('3009876543');
+    toast.info('Datos de prueba cargados', {
+      description: 'Listo para probar Reserva Atómica → Wompi Sandbox → Stock.',
+    });
+  };
+
   const totalConvertido = convertPrice(total, currency, rates);
   const totalFormateado = formatCurrency(totalConvertido, currency);
 
   const resolverNombreCliente = () =>
     clienteNombre.trim() || username || user?.email?.split('@')[0] || 'Cliente Nexus';
 
-  // 📱 Opción 1: Reserva stock mediante RPC transaccional y envía pedido por WhatsApp
+  // 📱 Opción 1: Reserva stock mediante RPC transaccional idempotente y envía pedido por WhatsApp
   const enviarPedidoWhatsApp = async () => {
     if (items.length === 0 || isProcessing) return;
     if (hayPendientes) {
@@ -54,6 +85,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
         metodoPago: 'whatsapp',
         moneda: currency,
         itemsCarrito: items,
+        idempotencyKey: obtenerClaveIdempotencia(),
       });
 
       const refCorta = pedido.id.slice(0, 8).toUpperCase();
@@ -79,6 +111,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
       });
       window.open(`https://wa.me/${numeroTelefono}?text=${mensajeCodificado}`, '_blank');
 
+      resetIdempotencyKey();
       limpiarCarrito();
       onClose();
     } catch (err) {
@@ -92,7 +125,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
     }
   };
 
-  // 💳 Opción 2: Reserva stock mediante RPC y abre pasarela Wompi Sandbox (PSE, Nequi, Tarjetas)
+  // 💳 Opción 2: Reserva stock mediante RPC idempotente y abre pasarela Wompi Sandbox (PSE, Nequi, Tarjetas)
   const iniciarPagoWompiSandbox = async () => {
     if (items.length === 0 || isProcessing) return;
     if (hayPendientes) {
@@ -108,6 +141,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
         metodoPago: 'wompi',
         moneda: currency,
         itemsCarrito: items,
+        idempotencyKey: obtenerClaveIdempotencia(),
       });
       setPedidoWompiActivo(pedido);
     } catch (err) {
@@ -125,6 +159,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
   };
 
   const handleVaciarCarrito = () => {
+    resetIdempotencyKey();
     limpiarCarrito();
     toast.error('Se ha vaciado el carrito');
   };
@@ -213,6 +248,22 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
           {/* RESUMEN, DATOS DE RESERVA Y BOTONES DE PAGO */}
           {items.length > 0 && (
             <div className="border-t border-themeBorder px-4 py-4 sm:px-6 bg-themeInput space-y-3">
+              {/* Encabezado datos + botón rápido de prueba */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-themeTextMuted">
+                  Datos de Reserva
+                </span>
+                <button
+                  type="button"
+                  onClick={handleRellenarDatosPrueba}
+                  className="text-[10px] font-black text-themeAccent hover:text-themeAccentHover bg-themeAccent/10 hover:bg-themeAccent/15 border border-themeAccent/25 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                  title="Autocompletar datos de cliente demo para probar el flujo completo"
+                >
+                  <Zap size={11} className="fill-current" />
+                  Rellenar datos de prueba
+                </button>
+              </div>
+
               {/* Campos rápidos para asociar la reserva de stock */}
               <div className="grid grid-cols-2 gap-2">
                 <input
@@ -237,7 +288,7 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
               </div>
 
               <p className="text-[10px] text-themeTextMuted leading-snug">
-                Al confirmar, el stock se aparta automáticamente mediante transacción en base de datos.
+                Al confirmar, el stock se aparta de forma atómica e idempotente en PostgreSQL.
               </p>
 
               <div className="space-y-2">
@@ -288,8 +339,15 @@ export default function CarritoSidebar({ isOpen, onClose }: CarritoSidebarProps)
       <Suspense fallback={null}>
         <WompiCheckoutModal
           pedido={pedidoWompiActivo}
-          onClose={() => setPedidoWompiActivo(null)}
+          onClose={() => {
+            const actual = usePedidosStore.getState().pedidos.find((p) => p.id === pedidoWompiActivo?.id);
+            if (actual && actual.estado !== 'pendiente') {
+              resetIdempotencyKey();
+            }
+            setPedidoWompiActivo(null);
+          }}
           onSuccess={() => {
+            resetIdempotencyKey();
             setPedidoWompiActivo(null);
             limpiarCarrito();
             onClose();

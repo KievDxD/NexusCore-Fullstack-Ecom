@@ -70,6 +70,7 @@ export interface Pedido {
   total: number;
   estado: EstadoPedido;
   referencia_pago?: string | null;
+  idempotency_key?: string | null;
   items: PedidoItem[];
   created_at: string;
 }

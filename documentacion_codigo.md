@@ -94,23 +94,25 @@ El backend de base de datos PostgreSQL está estructurado con las siguientes rel
 
 ---
 
-## 6. Asistente de Compatibilidad PC Builder
+## 6. Asistente de Compatibilidad PC Builder & Asesor IA de Arquitectura
 
-- **`usePCBuilder.ts`**: Motor algorítmico de ensamble y verificación de compatibilidad de hardware.
+- **`usePCBuilder.ts`**: Motor algorítmico de ensamble, verificación de compatibilidad e inteligencia de cuellos de botella.
   - **Pasos Secuenciales**: Flujo guiado por slots (`cpu`, `board`, `ram`, `gpu`, `storage`, `cooler`, `case`, `psu`).
   - **Matriz de Compatibilidad**: Valida compatibilidad de sockets (AM4, AM5, LGA1700, LGA1200), estándar de memoria (DDR4 vs DDR5), factor de forma físico (ATX, Micro-ATX, Mini-ITX) y soporte en el chasis.
-  - **Cálculo de Consumo Energético**: Suma el TDP estimado de las piezas seleccionadas y calcula la potencia de fuente de poder recomendada con margen de seguridad (+150W a +200W).
-- **`PCBuilderModal.tsx`**: Interfaz interactiva donde el usuario visualiza las piezas seleccionadas, alertas de incompatibilidad en tiempo real y el botón para exportar todo el ensamble al carrito en un solo clic.
+  - **Cálculo de Consumo Energético**: Suma el TDP estimado de las piezas seleccionadas y calcula la potencia de fuente de poder recomendada con margen de seguridad (`(TDP + 40W) * 1.25`).
+  - **Asesor de Cuellos de Botella & Upgrades (`ejecutarAnalisisIA` / `analizarEnsambleDeterministico`)**: Invoca la Edge Function `analizar-ensamble` enviando el ensamble actual y el catálogo con stock disponible (`stock > 0`), con respaldo heurístico determinístico instantáneo si no existe API Key de LLM.
+- **Edge Function `supabase/functions/analizar-ensamble/index.ts`**: Procesa Structured Outputs (JSON) mediante Gemini/OpenAI verificando que cada upgrade sugerido exista con stock real y compatibilidad de plataforma, o ejecuta el motor determinístico en `<50 ms`.
+- **`PCBuilderModal.tsx`**: Interfaz interactiva con el botón **"Analizar Ensamble con IA"**, tarjeta flagship **NEXUS AI // ARCHITECT** (score 0-100, porcentaje de cuello de botella y advertencias) y botones **Swap 1-Click** (`aplicarUpgradeIA`) para reemplazar piezas sugeridas al instante.
 
 ---
 
-## 7. Pasarela de Pagos Wompi y Motor Transaccional
+## 7. Pasarela de Pagos Wompi, Idempotencia y Motor Transaccional
 
-- **`usePedidos.ts`**: Administra el ciclo de vida de los pedidos, reservas de stock y generación de firmas criptográficas.
+- **`usePedidos.ts`**: Administra el ciclo de vida de los pedidos, claves UUID v4 de idempotencia (`generarIdempotencyKey`), deduplicación en vuelo (`inFlightOrderRequests`) y generación de firmas criptográficas.
   - **Firma de Integridad Wompi (`generarFirmaIntegridadWompi`)**: Calcula el hash SHA-256 concatenando la referencia, el monto en centavos, la divisa (`COP`) y el Integrity Secret de Wompi mediante la Web Crypto API nativa.
-  - **Reserva Atómica de Stock (`crear_pedido_con_reserva`)**: Invoca la función almacenada de Postgres (RPC) para verificar stock, decrementar unidades y crear la orden dentro de una transacción ACID, previniendo sobreventas (*overselling*).
-- **`WompiCheckoutModal.tsx`**: Widget incrustado que conecta con el Checkout Web de Wompi para procesar tarjetas de crédito/débito, PSE, Nequi y Bancolombia.
-- **Webhook de Supabase (`supabase/functions/wompi-webhook`)**: Edge Function que valida eventos de confirmación (`transaction.updated`), verifica el checksum y actualiza el pedido a `pagado` o revierte el stock en caso de transacción declinada.
+  - **Reserva Atómica e Idempotente de Stock (`crear_pedido_y_reservar_stock`)**: Protegida por `idempotency_key uuid UNIQUE` y `pg_advisory_xact_lock` en PostgreSQL (`supabase/migrations/20261115000000_idempotency_and_ai_advisor.sql`), bloquea filas con `FOR UPDATE` y garantiza que los reintentos retornen el pedido existente sin doble descuento de stock. Incluye retrocompatibilidad automática ante bases sin la columna migrada.
+- **`CarritoSidebar.tsx` y `WompiCheckoutModal.tsx`**: Incorporan autocompletado instantáneo **"Rellenar datos de prueba"** para QA/Demo de 5 segundos y protección contra dobles clics en pagos Nequi, PSE y Tarjeta Sandbox.
+- **Webhook de Supabase (`supabase/functions/wompi-webhook`)**: Edge Function idempotente que deduplica eventos en memoria (`processedEvents`), consulta previamente `public.pedidos` y ejecuta `cambiar_estado_pedido` con bloqueo `FOR UPDATE` para tolerar reintentos de red sin duplicar reversiones de stock.
 
 ---
 

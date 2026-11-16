@@ -11,6 +11,7 @@ import {
   XCircle,
   Lock,
   ExternalLink,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Pedido } from '../types';
@@ -36,6 +37,8 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
   const [celularNequi, setCelularNequi] = useState('3001234567');
   const [bancoPse, setBancoPse] = useState('Bancolombia');
   const [numTarjeta, setNumTarjeta] = useState('4242 •••• •••• 4242');
+  const [fechaTarjeta, setFechaTarjeta] = useState('12/29');
+  const [cvcTarjeta, setCvcTarjeta] = useState('123');
 
   const montoEnCentavos = pedido ? Math.round(pedido.total * 100) : 0;
   const publicKey = import.meta.env.VITE_WOMPI_PUBLIC_KEY || 'pub_test_NexusCoreSandboxCol';
@@ -55,11 +58,23 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
 
   if (!pedido) return null;
 
+  const handleRellenarSandbox = () => {
+    setCelularNequi('3001234567');
+    setBancoPse('Bancolombia');
+    setNumTarjeta('4242 •••• •••• 4242');
+    setFechaTarjeta('12/29');
+    setCvcTarjeta('123');
+    toast.info('Credenciales de prueba Wompi cargadas', {
+      description: 'Listo para simular aprobación o rechazo idempotente.',
+    });
+  };
+
   const simularResultadoTransaccion = async (resultado: 'APPROVED' | 'DECLINED') => {
+    if (procesando) return;
     setProcesando(true);
     try {
       await new Promise((r) => setTimeout(r, 900));
-      const wompiTxId = `wompi_sandbox_${medio}_${Date.now()}`;
+      const wompiTxId = `wompi_sandbox_${medio}_${pedido.id.slice(0, 8)}`;
 
       if (resultado === 'APPROVED') {
         await cambiarEstadoPedido(pedido.id, 'pagado', wompiTxId);
@@ -205,6 +220,21 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
 
           {/* Formulario contextual según el medio elegido */}
           <div className="p-4 rounded-2xl bg-themeCard border border-themeBorder/60 space-y-3">
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-themeBorder/40">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                <ShieldCheck size={12} /> Pago Idempotente Activo
+              </span>
+              <button
+                type="button"
+                onClick={handleRellenarSandbox}
+                className="text-[10px] font-black text-themeAccent hover:text-themeAccentHover bg-themeAccent/10 hover:bg-themeAccent/15 border border-themeAccent/25 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                title="Rellenar datos válidos de prueba en Wompi Sandbox"
+              >
+                <Zap size={11} className="fill-current" />
+                Rellenar datos de prueba
+              </button>
+            </div>
+
             {medio === 'nequi' && (
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-wider text-themeTextMuted mb-1.5">
@@ -215,7 +245,7 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
                   value={celularNequi}
                   onChange={(e) => setCelularNequi(e.target.value)}
                   placeholder="3001234567"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
                 />
                 <p className="text-[10px] text-themeTextMuted mt-1.5">
                   Simula la notificación Push de Nequi en entorno de pruebas.
@@ -231,7 +261,7 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
                 <select
                   value={bancoPse}
                   onChange={(e) => setBancoPse(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText focus:outline-none focus:ring-2 focus:ring-sky-500/40"
                 >
                   <option value="Bancolombia">Bancolombia (Pruebas)</option>
                   <option value="Davivienda">Davivienda (Pruebas)</option>
@@ -250,20 +280,22 @@ export default function WompiCheckoutModal({ pedido, onClose, onSuccess }: Wompi
                   type="text"
                   value={numTarjeta}
                   onChange={(e) => setNumTarjeta(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
-                    defaultValue="12/29"
+                    value={fechaTarjeta}
+                    onChange={(e) => setFechaTarjeta(e.target.value)}
                     placeholder="MM/AA"
-                    className="px-3.5 py-2 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText"
+                    className="px-3.5 py-2 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                   />
                   <input
                     type="text"
-                    defaultValue="123"
+                    value={cvcTarjeta}
+                    onChange={(e) => setCvcTarjeta(e.target.value)}
                     placeholder="CVC"
-                    className="px-3.5 py-2 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText"
+                    className="px-3.5 py-2 rounded-xl bg-themeInput border border-themeBorder text-xs font-bold text-themeText focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                   />
                 </div>
               </div>

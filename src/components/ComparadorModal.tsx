@@ -60,7 +60,7 @@ export default function ComparadorModal() {
                 {tipoActual.label}
               </span>
             )}
-            <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+            <div className="flex items-center gap-2 overflow-x-auto custom-h-scrollbar pb-1">
               {items.map((prod) => (
                 <div
                   key={prod.id}
@@ -165,7 +165,7 @@ export default function ComparadorModal() {
                     </th>
                     {items.map((prod) => (
                       <th key={prod.id} className="p-3 align-top border-b border-themeBorder/60 min-w-[180px]">
-                        <div className="bg-themeCard p-3.5 rounded-2xl border border-themeBorder/60 space-y-2.5 text-left relative">
+                        <div className="bg-themeCard p-3.5 rounded-2xl border border-themeBorder/60 hover:border-themeAccent/40 hover:shadow-lg transition-all space-y-2.5 text-left relative">
                           <button
                             type="button"
                             onClick={() => quitarDeComparador(prod.id)}

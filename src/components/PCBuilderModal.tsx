@@ -12,6 +12,10 @@ import {
   Filter,
   ChevronRight,
   Sparkles,
+  BrainCircuit,
+  ArrowLeftRight,
+  Loader2,
+  Gauge,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -42,11 +46,15 @@ export default function PCBuilderModal({ isOpen, onClose, onAbrirCarrito }: PCBu
   const seleccion = usePCBuilderStore((s) => s.seleccion);
   const pasoActual = usePCBuilderStore((s) => s.pasoActual);
   const soloCompatibles = usePCBuilderStore((s) => s.soloCompatibles);
+  const analisisIA = usePCBuilderStore((s) => s.analisisIA);
+  const analizandoIA = usePCBuilderStore((s) => s.analizandoIA);
   const seleccionarPieza = usePCBuilderStore((s) => s.seleccionarPieza);
   const quitarPieza = usePCBuilderStore((s) => s.quitarPieza);
   const setPasoActual = usePCBuilderStore((s) => s.setPasoActual);
   const setSoloCompatibles = usePCBuilderStore((s) => s.setSoloCompatibles);
   const reiniciarBuilder = usePCBuilderStore((s) => s.reiniciarBuilder);
+  const ejecutarAnalisisIA = usePCBuilderStore((s) => s.ejecutarAnalisisIA);
+  const aplicarUpgradeIA = usePCBuilderStore((s) => s.aplicarUpgradeIA);
 
   const infoPaso = useMemo(
     () => PASOS_PC_BUILDER.find((p) => p.slot === pasoActual) ?? PASOS_PC_BUILDER[0],
@@ -130,6 +138,35 @@ export default function PCBuilderModal({ isOpen, onClose, onAbrirCarrito }: PCBu
 
   const formatearPrecio = (p: Producto) =>
     formatCurrency(convertPrice(precioConDescuento(p), currency, rates), currency);
+
+  const formatearCOP = (montoCOP: number) =>
+    formatCurrency(convertPrice(montoCOP, currency, rates), currency);
+
+  const handleAnalizarIA = async () => {
+    if (piezasSeleccionadas.length === 0) {
+      toast.warning('Elige al menos un componente para que la IA evalúe el ensamble.');
+      return;
+    }
+    const resultado = await ejecutarAnalisisIA(productos);
+    toast.success(`Diagnóstico completado (${resultado.puntuacion_balance}/100)`, {
+      description:
+        resultado.upgrades_sugeridos.length > 0
+          ? `${resultado.upgrades_sugeridos.length} mejora(s) sugerida(s) con stock real en tienda.`
+          : resultado.nivel_ensamble,
+    });
+  };
+
+  const handleSwapUpgrade = (productoId: number, slot: typeof pasoActual) => {
+    const prodReal = productos.find((p) => p.id === productoId && (p.stock ?? 0) > 0);
+    if (!prodReal) {
+      toast.error('Este producto ya no cuenta con stock disponible.');
+      return;
+    }
+    aplicarUpgradeIA(slot, prodReal, productos);
+    toast.success(`¡Pieza actualizada en 1 clic!`, {
+      description: `${prodReal.nombre} asignado al slot ${slot.toUpperCase()}.`,
+    });
+  };
 
   return createPortal(
     <div
@@ -374,8 +411,129 @@ export default function PCBuilderModal({ isOpen, onClose, onAbrirCarrito }: PCBu
                 </div>
               )}
 
+              {/* CTA & TARJETA FLAGSHIP IA: ASESOR DE CUELLOS DE BOTELLA Y UPGRADES */}
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={handleAnalizarIA}
+                  disabled={analizandoIA || piezasSeleccionadas.length === 0}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-violet-600/25 flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  {analizandoIA ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      Analizando Arquitectura...
+                    </>
+                  ) : (
+                    <>
+                      <BrainCircuit size={15} />
+                      Analizar Ensamble con IA
+                    </>
+                  )}
+                </button>
+
+                {analisisIA && (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-themeCard via-themeCard to-indigo-950/20 border border-violet-500/40 shadow-lg shadow-violet-500/10 space-y-3 animate-fade-in">
+                    {/* Header IA */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Gauge size={14} className="text-violet-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-violet-300 truncate">
+                          Nexus AI // Architect
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 ${
+                          analisisIA.puntuacion_balance >= 80
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : analisisIA.puntuacion_balance >= 60
+                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                        }`}
+                      >
+                        Balance {analisisIA.puntuacion_balance}/100
+                      </span>
+                    </div>
+
+                    {/* Barra de progreso de balance */}
+                    <div className="space-y-1">
+                      <div className="w-full h-2 rounded-full bg-themeInput overflow-hidden border border-themeBorder/50">
+                        <div
+                          className={`h-full transition-all duration-500 ${
+                            analisisIA.puntuacion_balance >= 80
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                              : analisisIA.puntuacion_balance >= 60
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                                : 'bg-gradient-to-r from-rose-500 to-pink-500'
+                          }`}
+                          style={{ width: `${analisisIA.puntuacion_balance}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[9px] font-bold text-themeTextMuted">
+                        <span>{analisisIA.nivel_ensamble}</span>
+                        <span>Cuello de botella ~{analisisIA.cuello_botella_porcentaje}%</span>
+                      </div>
+                    </div>
+
+                    {/* Diagnóstico conciso */}
+                    <p className="text-[11px] text-themeText leading-relaxed font-medium">
+                      {analisisIA.diagnostico_tecnico}
+                    </p>
+
+                    {/* Advertencias */}
+                    {analisisIA.advertencias.length > 0 && (
+                      <div className="space-y-1 bg-amber-500/10 border border-amber-500/25 rounded-xl p-2">
+                        {analisisIA.advertencias.map((adv, idx) => (
+                          <p key={idx} className="text-[10px] text-amber-300 font-semibold leading-snug">
+                            • {adv}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Upgrades sugeridos con Swap 1-Click */}
+                    {analisisIA.upgrades_sugeridos.length > 0 && (
+                      <div className="space-y-2 pt-1 border-t border-themeBorder/40">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400 flex items-center gap-1">
+                          <Sparkles size={11} /> Upgrades Recomendados (Stock Real)
+                        </span>
+                        {analisisIA.upgrades_sugeridos.map((up) => (
+                          <div
+                            key={`${up.slot}-${up.producto_sugerido_id}`}
+                            className="p-2.5 rounded-xl bg-themeInput/70 border border-themeBorder/70 space-y-1.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-violet-400">
+                                  Slot {up.slot.toUpperCase()} · {up.ganancia_estimada}
+                                </span>
+                                <p className="text-[11px] font-black text-themeText truncate">
+                                  {up.producto_sugerido_nombre}
+                                </p>
+                              </div>
+                              <span className="text-[11px] font-black text-emerald-400 shrink-0">
+                                {formatearCOP(up.precio_cop)}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-themeTextMuted leading-snug">{up.razon_tecnica}</p>
+                            <button
+                              type="button"
+                              onClick={() => handleSwapUpgrade(up.producto_sugerido_id, up.slot)}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-white border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                            >
+                              <ArrowLeftRight size={12} />
+                              Swap 1-Click ({up.slot.toUpperCase()})
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Lista de Slots */}
-              <div className="space-y-1.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+              <div className="space-y-1.5 max-h-[210px] overflow-y-auto custom-scrollbar pr-1">
                 {PASOS_PC_BUILDER.map((paso) => {
                   const prod = seleccion[paso.slot];
                   return (
